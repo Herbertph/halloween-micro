@@ -39,7 +39,9 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function makeHttp(options: { failStripe?: boolean; throwGemini?: boolean } = {}) {
+function makeHttp(
+  options: { failStripe?: boolean; throwGemini?: boolean; emptyGemini?: boolean } = {},
+) {
   const calls: string[] = [];
   const http = async (url: string, init: RequestInit = {}) => {
     calls.push(`${init.method ?? "GET"} ${url}`);
@@ -47,7 +49,17 @@ function makeHttp(options: { failStripe?: boolean; throwGemini?: boolean } = {})
       if (options.throwGemini) {
         throw new Error(`provider exploded with ${SECRETS.GEMINI_API_KEY}`);
       }
-      return json({ candidates: [] });
+      return json({
+        candidates: options.emptyGemini
+          ? []
+          : [
+              {
+                content: {
+                  parts: [{ inlineData: { mimeType: "image/jpeg", data: "aW1hZ2U=" } }],
+                },
+              },
+            ],
+      });
     }
     if (url.startsWith("http://stripe.local")) {
       if (url.endsWith("/expire")) return json({});
@@ -135,6 +147,21 @@ describe("verify:providers", () => {
       Upstash: "PASS",
       Turnstile: "PASS",
     });
+  });
+
+  it("FR-4/FR-5: a Gemini response without an image is a verifier FAIL", async () => {
+    const empty = makeHttp({ emptyGemini: true });
+    const result = await runVerifier({
+      env: configuredEnv(),
+      http: empty.http,
+      argv: [],
+      blobApiBase: "http://blob.local",
+    });
+    const gemini = result.results.find(
+      (entry: { service: string }) => entry.service === "Gemini",
+    );
+    expect(gemini?.status).toBe("FAIL");
+    expect(result.exitCode).toBe(1);
   });
 
   it("G3-AC-8: pass, fail, verbose, crash and dry-run outputs never contain a secret", async () => {

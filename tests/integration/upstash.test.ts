@@ -86,6 +86,29 @@ describe("Upstash driver", () => {
     }
   });
 
+  it("FR-8: a hanging Upstash request is bounded by a timeout", async () => {
+    const stub = await startStub(() => ({ hang: true }));
+    try {
+      // The Blob driver takes a test timeout; the KV driver should mirror it.
+      const WithTimeout = UpstashKV as unknown as new (
+        url: string,
+        token: string,
+        timeoutMs?: number,
+      ) => UpstashKV;
+      const kv = new WithTimeout(stub.url, TOKEN, 100);
+      const outcome = await Promise.race([
+        kv
+          .get("hang")
+          .then(() => "resolved")
+          .catch(() => "rejected"),
+        new Promise((resolve) => setTimeout(() => resolve("pending"), 500)),
+      ]);
+      expect(outcome).toBe("rejected");
+    } finally {
+      await stub.close();
+    }
+  });
+
   it("G3-AC-10: a losing conditional delete leaves the newer claim intact", async () => {
     const state: State = {
       values: new Map([["claim:job:witch", "newer-token"]]),

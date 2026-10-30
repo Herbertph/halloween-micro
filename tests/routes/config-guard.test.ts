@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as checkout } from "@/app/api/checkout/route";
 import { POST as generate } from "@/app/api/generate/route";
 import { GET as health } from "@/app/api/health/route";
+import { describeConfig } from "@/lib/config-check";
+import { isDemoMode } from "@/lib/demo";
 import { imageForm, jsonRequest } from "../helpers/jobs";
 import { useTempDataDir } from "../helpers";
 
@@ -110,6 +112,25 @@ describe("production guard", () => {
       () => [],
     );
     expect(stored).toEqual([]);
+  });
+});
+
+describe("demo opt-in safety", () => {
+  it("FR-1/FR-3: real providers are never labelled a no-payment demo", () => {
+    const env = liveEnv({ ALLOW_MOCK_PROVIDERS: "true" });
+    expect(describeConfig(env).mode).toBe("live");
+    expect(isDemoMode(env)).toBe(false);
+  });
+
+  it("FR-1: the demo opt-in cannot allow local drivers with a real payment provider", () => {
+    const env = liveEnv({
+      ALLOW_MOCK_PROVIDERS: "true",
+      STORAGE_DRIVER: "local",
+      KV_DRIVER: "local",
+    });
+    const status = describeConfig(env);
+    expect(status.ready).toBe(false);
+    expect(isDemoMode(env)).toBe(false);
   });
 });
 

@@ -38,7 +38,11 @@ export function describeConfig(env: ConfigSnapshot): ConfigStatus {
   const image = value(env, "IMAGE_PROVIDER", "mock").toLowerCase();
   const storage = value(env, "STORAGE_DRIVER", "local").toLowerCase();
   const kv = value(env, "KV_DRIVER", "local").toLowerCase();
-  const mode: ConfigMode = allowMock ? "demo" : "live";
+  // A demo is only truthful when it cannot take real money. The opt-in must
+  // never turn a real-payment deploy into a labelled demo or relax the durable
+  // storage rules that protect paid images.
+  const demo = allowMock && payment === "mock";
+  const mode: ConfigMode = demo ? "demo" : "live";
   const problems: string[] = [];
 
   if (!production) {
@@ -50,7 +54,7 @@ export function describeConfig(env: ConfigSnapshot): ConfigStatus {
     };
   }
 
-  if (!allowMock) {
+  if (!demo) {
     if (payment === "mock") {
       problems.push("PAYMENT_PROVIDER=mock is not allowed in production");
     }
@@ -78,7 +82,7 @@ export function describeConfig(env: ConfigSnapshot): ConfigStatus {
   if (kv === "upstash") {
     missing(env, ["KV_REST_URL", "KV_REST_TOKEN"], problems);
   }
-  if (allowMock && payment === "mock") {
+  if (demo && payment === "mock") {
     missing(env, ["MOCK_WEBHOOK_SECRET"], problems);
   }
 

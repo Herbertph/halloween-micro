@@ -38,45 +38,58 @@ export async function handlePaymentWebhook(
 
   const kv = getKv();
   const marker = `webhook:${parsed.eventId}`;
-  if (await kv.get(marker)) return ignored("duplicate");
+  // Claim the event atomically before any side effect. A concurrent delivery
+  // loses this SET NX and is ignored, so the sale can only be recorded once.
+  const claimed = await kv.setIfAbsent(
+    marker,
+    "processing",
+    IDEMPOTENCY_TTL_SECONDS,
+  );
+  if (!claimed) return ignored("duplicate");
 
-  const job = await loadJob(parsed.jobId);
-  if (!job || job.status === "expired" || job.status === "failed") {
-    return ignored("unknown_job");
+  try {
+    const job = await loadJob(parsed.jobId);
+    if (!job || job.status === "expired" || job.status === "failed") {
+      return ignored("unknown_job");
+    }
+
+    const session = await getSession(parsed.sessionId);
+    const product: Product = session?.product ?? job.product ?? "single";
+    const amountCents = session?.amountCents ?? productPriceCents(product);
+    const firstUnlock = !isPaid(job);
+
+    if (firstUnlock) {
+      let next = job;
+      if (next.status === "preview_ready") {
+        next = transition(next, "awaiting_payment");
+      }
+      if (next.status === "awaiting_payment") {
+        next = transition(next, "paid");
+      }
+      if (next.status === "paid") {
+        next = transition(next, "unlocked");
+      }
+      if (!isPaid(next)) return ignored("job_state");
+
+      next = applyProductToAssets(next, product);
+      next.product = product;
+      next.paidAmountCents = amountCents;
+      await saveJob(next);
+      await recordSale({ product, amountCents });
+    } else if (!job.product) {
+      await saveJob({
+        ...applyProductToAssets(job, product),
+        product,
+        paidAmountCents: job.paidAmountCents ?? amountCents,
+      });
+    }
+
+    await setSessionStatus(parsed.sessionId, "paid");
+    await kv.set(marker, "done", { exSeconds: IDEMPOTENCY_TTL_SECONDS });
+    return Response.json({ received: true });
+  } catch (error) {
+    // Processing failed: release the claim so the provider's retry can succeed.
+    await kv.deleteIfValue(marker, "processing");
+    throw error;
   }
-
-  const session = await getSession(parsed.sessionId);
-  const product: Product = session?.product ?? job.product ?? "single";
-  const amountCents = session?.amountCents ?? productPriceCents(product);
-  const firstUnlock = !isPaid(job);
-
-  if (firstUnlock) {
-    let next = job;
-    if (next.status === "preview_ready") {
-      next = transition(next, "awaiting_payment");
-    }
-    if (next.status === "awaiting_payment") {
-      next = transition(next, "paid");
-    }
-    if (next.status === "paid") {
-      next = transition(next, "unlocked");
-    }
-    if (!isPaid(next)) return ignored("job_state");
-
-    next = applyProductToAssets(next, product);
-    next.product = product;
-    next.paidAmountCents = amountCents;
-    await saveJob(next);
-    await recordSale({ product, amountCents });
-  } else if (!job.product) {
-    await saveJob({
-      ...applyProductToAssets(job, product),
-      product,
-      paidAmountCents: job.paidAmountCents ?? amountCents,
-    });
-  }
-
-  await setSessionStatus(parsed.sessionId, "paid");
-  await kv.set(marker, "1", { exSeconds: IDEMPOTENCY_TTL_SECONDS });
-  return Response.json({ received: true });
 }

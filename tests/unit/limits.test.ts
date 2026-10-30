@@ -33,6 +33,14 @@ describe("per-IP rolling window", () => {
     expect(allowedAgain.allowed).toBe(true);
   });
 
+  it("AC-16: parallel attempts from one IP cannot exceed the rolling limit", async () => {
+    const now = new Date("2026-10-30T10:00:00.000Z");
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => consumePreviewAttempt("ip-raced", now)),
+    );
+    expect(results.filter((result) => result.allowed)).toHaveLength(3);
+  });
+
   it("counts windows per IP", async () => {
     const now = new Date("2026-10-30T10:00:00.000Z");
     await consumePreviewAttempt("ip-a", now);
@@ -51,6 +59,15 @@ describe("global daily cap", () => {
     expect((await consumeDailyGeneration(now)).allowed).toBe(true);
     expect((await consumeDailyGeneration(now)).allowed).toBe(false);
     expect((await consumeDailyGeneration(now)).allowed).toBe(false);
+  });
+
+  it("AC-17: parallel requests cannot exceed the global daily cap", async () => {
+    process.env.DAILY_GENERATION_CAP = "3";
+    const now = new Date("2026-10-30T10:00:00.000Z");
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => consumeDailyGeneration(now)),
+    );
+    expect(results.filter((result) => result.allowed)).toHaveLength(3);
   });
 
   it("resets on a new UTC day", async () => {

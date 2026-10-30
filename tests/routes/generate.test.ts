@@ -7,6 +7,8 @@ import { POST as generate } from "@/app/api/generate/route";
 import { GET as getPreview } from "@/app/api/preview/[id]/route";
 import { GET as getJob } from "@/app/api/jobs/[id]/route";
 import { POST as checkout } from "@/app/api/checkout/route";
+import { getStorage } from "@/lib/storage";
+import { loadJob } from "@/lib/job-service";
 import { resetLimitEnv, useTempDataDir } from "../helpers";
 import { imageForm, jsonRequest } from "../helpers/jobs";
 
@@ -120,6 +122,41 @@ describe("POST /api/generate", () => {
     const jobText = await jobResponse.text();
     expect(jobText).not.toMatch(/blobs\//);
     expect(jobText).not.toMatch(/api\/download/);
+  });
+
+  it("AC-8: the stored original and the generated result carry no EXIF/GPS", async () => {
+    const withExif = await fixture("gps.jpg");
+    expect(withExif.includes(Buffer.from("Fixture Camera"))).toBe(true);
+
+    const response = await generate(request(imageForm(withExif), "10.0.0.8"));
+    expect(response.status).toBe(202);
+    const body = (await response.json()) as { jobId: string };
+
+    const job = await loadJob(body.jobId);
+    expect(job?.originalKey).toBeTruthy();
+    expect(job?.fullKey).toBeTruthy();
+
+    const storage = getStorage();
+    for (const key of [job!.originalKey!, job!.fullKey!]) {
+      const bytes = await storage.get(key);
+      expect(bytes).not.toBeNull();
+      const metadata = await sharp(bytes!).metadata();
+      expect(metadata.exif).toBeUndefined();
+      expect(bytes!.includes(Buffer.from("Fixture Camera"))).toBe(false);
+    }
+  });
+
+  it("FR-9: a corrupt JPEG with valid magic bytes is a typed 4xx, not a 500", async () => {
+    const truncated = Buffer.from([
+      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+    ]);
+    const response = await generate(request(imageForm(truncated), "10.0.0.9"));
+    const body = (await response.json()) as { error?: string };
+
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+    expect(typeof body.error).toBe("string");
+    expect(providerCalls.count).toBe(0);
   });
 
   it("AC-9: a featureless image fails with no_subject and offers no checkout", async () => {

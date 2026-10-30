@@ -5,6 +5,7 @@ import { POST as complete } from "@/app/checkout/mock/complete/route";
 import { POST as decline } from "@/app/checkout/mock/decline/route";
 import { GET as getJob } from "@/app/api/jobs/[id]/route";
 import { mockCheckoutEnabled } from "@/lib/payments-ui";
+import { mockWebhookBody } from "@/lib/providers/payments/mock";
 import { getSession } from "@/lib/sessions";
 import { loadJob } from "@/lib/job-service";
 import { resetLimitEnv, useTempDataDir } from "../helpers";
@@ -48,6 +49,23 @@ describe("checkout", () => {
     const updated = await loadJob(job.id);
     expect(updated?.status).toBe("awaiting_payment");
     expect(updated?.sessionId).toBe(body.sessionId);
+  });
+
+  it("AC-10: the mock webhook carries job_id in the session metadata", () => {
+    const event = JSON.parse(
+      mockWebhookBody({
+        eventId: "evt_1",
+        sessionId: "cs_1",
+        jobId: "job_metadata",
+      }),
+    ) as {
+      type: string;
+      data: { object: { id: string; metadata: { job_id: string } } };
+    };
+
+    expect(event.type).toBe("checkout.session.completed");
+    expect(event.data.object.id).toBe("cs_1");
+    expect(event.data.object.metadata.job_id).toBe("job_metadata");
   });
 
   it("AC-22: the mock checkout is enabled only for PAYMENT_PROVIDER=mock", async () => {

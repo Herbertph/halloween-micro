@@ -105,6 +105,85 @@ describe("/create form", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("AC-16: a rate-limited visitor sees when they may try again", async () => {
+    renderForm();
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({
+        error: "rate_limited",
+        retryAt: "2026-10-31T10:00:00.000Z",
+      }),
+    });
+
+    fireEvent.change(fileInput(), { target: { files: [validJpeg()] } });
+    fireEvent.click(screen.getByLabelText(/I own this photo/i));
+    fireEvent.click(screen.getByRole("button", { name: /generate free preview/i }));
+
+    expect(
+      await screen.findByText(/try again after Oct 31, 2026, 10:00 UTC/i),
+    ).toBeInTheDocument();
+  });
+
+  it("AC-17: the capacity message is shown when the daily cap is reached", async () => {
+    renderForm();
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: "capacity" }),
+    });
+
+    fireEvent.change(fileInput(), { target: { files: [validJpeg()] } });
+    fireEvent.click(screen.getByLabelText(/I own this photo/i));
+    fireEvent.click(screen.getByRole("button", { name: /generate free preview/i }));
+
+    expect(
+      await screen.findByText(/we're at capacity today/i),
+    ).toBeInTheDocument();
+  });
+
+  it("AC-18: a transient failure offers a free retry and no checkout", async () => {
+    renderForm();
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ jobId: "job_3", status: "failed", error: "transient" }),
+    });
+
+    fireEvent.change(fileInput(), { target: { files: [validJpeg()] } });
+    fireEvent.click(screen.getByLabelText(/I own this photo/i));
+    fireEvent.click(screen.getByRole("button", { name: /generate free preview/i }));
+
+    expect(
+      await screen.findByText(/something hiccuped/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /unlock hd/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("AC-19: a timeout failure shows the timeout message and a free retry", async () => {
+    renderForm();
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ jobId: "job_4", status: "failed", error: "timeout" }),
+    });
+
+    fireEvent.change(fileInput(), { target: { files: [validJpeg()] } });
+    fireEvent.click(screen.getByLabelText(/I own this photo/i));
+    fireEvent.click(screen.getByRole("button", { name: /generate free preview/i }));
+
+    expect(
+      await screen.findByText(/generation took too long/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /unlock hd/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the paywall with the price after a successful preview", async () => {
     renderForm();
     fetchMock.mockResolvedValue({

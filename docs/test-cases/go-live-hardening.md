@@ -2,8 +2,8 @@
 
 - **Spec:** [`docs/specs/go-live-hardening.md`](../specs/go-live-hardening.md)
 - **Branch:** `feature/go-live-hardening`
-- **Commit under test:** `5dea564` (implementation `dbea4a4`, `fdf8733`, `dcf3c3a`; tests `4ad1c30`)
-- **Test run:** full increment 3 test run with the increment 1 and 2 regressions
+- **Commit under test:** `66f2eee` (retest; first pass `5dea564`; fixes `73cd8f8`, `ca74d9e`, `1370c56`)
+- **Test run:** retest of #14, #15 and #16 plus the full increment 1/2/3 regression
 - **Frameworks:** Vitest + Testing Library (unit, route, component, stub-server integration), Playwright (iPhone 13 + Pixel 7), Lighthouse (opt-in), the manual `verify:providers` CLI
 
 ## Traceability summary
@@ -12,22 +12,22 @@
 |---|---|---|
 | G3-AC-1 | G3-TC-1 | Pass |
 | G3-AC-2 | G3-TC-2 | Pass |
-| G3-AC-3 | G3-TC-3 | Pass for the specified mock demo; **FR-1/FR-3 edge fails (#14)** |
+| G3-AC-3 | G3-TC-3 | Pass (FR-1/FR-3 edge fixed #14) |
 | G3-AC-4 | G3-TC-4 | Pass |
 | G3-AC-5 | G3-TC-5 | Pass |
 | G3-AC-6 | G3-TC-6 | Pass |
-| G3-AC-7 | G3-TC-7 | Pass for the configured-pass case; **FR-4/FR-5 edge fails (#15)** |
+| G3-AC-7 | G3-TC-7 | Pass (FR-4/FR-5 edge fixed #15) |
 | G3-AC-8 | G3-TC-8 | Pass |
 | G3-AC-9 | G3-TC-9 | Pass |
-| G3-AC-10 | G3-TC-10 | Pass for the listed operations; **FR-8 timeout gap (#16)** |
+| G3-AC-10 | G3-TC-10 | Pass (FR-8 timeout fixed #16) |
 | G3-AC-11 | G3-TC-11 | Pass |
 | G3-AC-12 | G3-TC-12 | Pass |
 | G3-AC-13 | G3-TC-13 | Pass |
 | G3-AC-14 | G3-TC-14 | Pass |
 | G3-AC-15 | G3-TC-15 | Pass |
-| FR-1/FR-3 demo safety | G3-TC-16 | **Fail (#14)** |
-| FR-4/FR-5 verifier correctness | G3-TC-17 | **Fail (#15)** |
-| FR-8 Upstash timeout | G3-TC-18 | **Fail (#16)** |
+| FR-1/FR-3 demo safety | G3-TC-16 | Pass (fixed #14) |
+| FR-4/FR-5 verifier correctness | G3-TC-17 | Pass (fixed #15) |
+| FR-8 Upstash timeout | G3-TC-18 | Pass (fixed #16) |
 
 ## Test cases
 
@@ -70,7 +70,7 @@
   4. Open `/success`; check the badge.
 - **Expected result:** "Demo — no real payment" is visible in the header, on the paywall and on success; generation and checkout work.
 - **Automated by:** `e2e/hardening.spec.ts` › `G3-AC-3: demo mode labels the header, paywall and success page` (both viewports)
-- **Status:** Pass for the specified mock-provider case. The real-payment edge is G3-TC-16.
+- **Status:** Pass — the specified mock demo is labelled; the real-payment edge (G3-TC-16) also passes after #14.
 
 ### G3-TC-4: Live production configuration is healthy and leaks no key
 - **Acceptance criterion:** G3-AC-4
@@ -122,7 +122,7 @@
   2. Make Stripe return 500; run again.
 - **Expected result:** First run 0 and five PASS; second run exit 1 and only Stripe FAIL.
 - **Automated by:** `tests/integration/verify-providers.test.ts` › `G3-AC-7: all configured services PASS against the stub, and one failure fails only that service`
-- **Status:** Pass for the configured-pass case. The response-shape check is G3-TC-17.
+- **Status:** Pass — all configured services pass and the one-failure case isolates the failure; the response-shape check (G3-TC-17) also passes after #15.
 
 ### G3-TC-8: No verifier path prints a secret
 - **Acceptance criterion:** G3-AC-8
@@ -161,7 +161,7 @@
   2. Run `deleteIfValue` with a losing token, then a matching token.
 - **Expected result:** `SET ... EX 60`, `INCRBY`, SADD/SMEMBERS/SREM commands; losing conditional delete leaves the newer claim, matching deletes.
 - **Automated by:** `tests/integration/upstash.test.ts` › the two G3-AC-10 tests
-- **Status:** Pass for the listed operations. The timeout gap is G3-TC-18.
+- **Status:** Pass — the listed operations work; the timeout case (G3-TC-18) also passes after #16.
 
 ### G3-TC-11: Sale recording is idempotent per session
 - **Acceptance criterion:** G3-AC-11
@@ -242,7 +242,7 @@
   2. Describe the second; check readiness/demo.
 - **Expected result:** Real providers → `mode: "live"`, no demo label; real payment + local drivers → not ready (or otherwise refused); the "no real payment" label never appears with a real payment provider.
 - **Automated by:** `tests/routes/config-guard.test.ts` › `FR-1/FR-3: real providers are never labelled a no-payment demo` and `FR-1: the demo opt-in cannot allow local drivers with a real payment provider`
-- **Status:** **Fail (#14)** — both configs are `ready` and `mode: "demo"`; the label is false for real Stripe and local drivers are allowed with real payments.
+- **Status:** Pass — verified in `66f2eee`; real-payment configs are `mode: "live"` with no demo label, and local drivers are refused with a real payment provider. (Originally failed as #14.)
 
 ### G3-TC-17: The Gemini verifier fails a 200 response with no image
 - **Acceptance criterion:** FR-4/FR-5 (the listed G3-AC-7 pass case is covered by G3-TC-7)
@@ -255,7 +255,7 @@
   2. Check the Gemini status and exit code.
 - **Expected result:** Gemini `FAIL`; exit 1.
 - **Automated by:** `tests/integration/verify-providers.test.ts` › `FR-4/FR-5: a Gemini response without an image is a verifier FAIL`
-- **Status:** **Fail (#15)** — Gemini `PASS`, exit 0; the probe never inspects the response body.
+- **Status:** Pass — verified in `66f2eee`; the probe parses candidates/parts and fails a 200 with no image part. (Originally failed as #15.)
 
 ### G3-TC-18: A hung Upstash request is bounded by a timeout
 - **Acceptance criterion:** FR-8 (the G3-AC-10 listed operations are covered by G3-TC-10)
@@ -268,7 +268,7 @@
   2. Observe whether it rejects within a bounded timeout.
 - **Expected result:** A typed timeout/network error within the configured budget, mirroring the Blob driver.
 - **Automated by:** `tests/integration/upstash.test.ts` › `FR-8: a hanging Upstash request is bounded by a timeout` (a hanging stub with a short target timeout; the Blob equivalent is `tests/integration/blob.test.ts` › `G3-AC-9: a hanging response hits the timeout instead of blocking`).
-- **Status:** **Fail (#16)** — `UpstashKV.command()` calls `fetch` with no signal/timeout; the hanging request stays pending past the target timeout.
+- **Status:** Pass — verified in `66f2eee`; `UpstashKV` aborts at the configurable timeout and throws a typed `KVError`. (Originally failed as #16.)
 
 ## Not covered
 

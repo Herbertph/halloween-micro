@@ -1,7 +1,6 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 
 import { mockWebhookSecret } from "@/lib/env";
-import { createSessionRecord } from "@/lib/sessions";
 
 import type {
   CreateSessionInput,
@@ -41,15 +40,12 @@ export function mockWebhookBody(input: {
  */
 export class MockPaymentsProvider implements PaymentsProvider {
   async createSession(
-    input: CreateSessionInput,
+    _input: CreateSessionInput,
   ): Promise<CreateSessionResult> {
-    const session = await createSessionRecord({
-      jobId: input.jobId,
-      amountCents: input.amountCents,
-    });
+    const sessionId = `cs_mock_${randomUUID().replace(/-/g, "")}`;
     return {
-      sessionId: session.id,
-      url: `/checkout/mock?session=${encodeURIComponent(session.id)}`,
+      sessionId,
+      url: `/checkout/mock?session=${encodeURIComponent(sessionId)}`,
     };
   }
 

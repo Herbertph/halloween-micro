@@ -3,6 +3,7 @@ import { priceCents } from "@/lib/env";
 import { loadJob, saveJob } from "@/lib/job-service";
 import { transition } from "@/lib/jobs";
 import { getPaymentsProvider } from "@/lib/providers/payments";
+import { createSessionRecord } from "@/lib/sessions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,9 +24,18 @@ export async function POST(request: Request): Promise<Response> {
       throw new ApiError("invalid_state", 409);
     }
 
+    const amountCents = priceCents();
     const session = await getPaymentsProvider().createSession({
       jobId: job.id,
-      amountCents: priceCents(),
+      amountCents,
+    });
+
+    // Persist the local session mapping for both providers, so /success and the
+    // webhook agreement work the same way with mock and Stripe session ids.
+    await createSessionRecord({
+      id: session.sessionId,
+      jobId: job.id,
+      amountCents,
     });
 
     const next =

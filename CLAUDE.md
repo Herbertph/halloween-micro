@@ -85,7 +85,8 @@ scripts/                asset/fixture generators and the bundle secret scan
 ## Project rules
 
 - **Money comes from the server.** The client only names `product` (`single`/`pack`); the price is read from env and the product/amount are stored on the session record. The job records its paid product only in the webhook.
-- **Pack extras are post-payment only.** Never generate, preview or store a pending style before the verified webhook. `claimPendingAsset` is atomic in KV; the success page and cron must keep sharing that path, and the chosen style is never regenerated.
+- **Pack extras are post-payment only.** Never generate, preview or store a pending style before the verified webhook. Each style claim is an atomic KV key with a TTL (`2 × GENERATION_TIMEOUT_MS + 30 s`); the success page and cron must share that path, `generating` assets older than one timeout are reclaimable, and the chosen style is never regenerated.
+- **Webhook idempotency is an atomic claim.** The event id is stored with SET NX before any side effect and released only if processing throws, so simultaneous deliveries record one sale.
 - **Download and share tokens use separate HMAC contexts.** Download tokens are bound to job + style + expiry; share tokens are signed under a distinct context and only issued to paid sessions.
 - **Turnstile secrets stay server-side.** `TURNSTILE_SITE_KEY` may be passed as a prop, but the secret is never logged, returned or bundled. Enforcement is off unless the flag and both keys are set, and verification happens before quota is consumed.
 - **Admin is aggregate-only.** No job ids, photos, storage keys or per-customer data in `/admin`; the cookie is HttpOnly, SameSite=Lax, signed under the admin context and lasts 8 h.

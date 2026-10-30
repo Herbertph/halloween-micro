@@ -151,12 +151,18 @@ fall back to obviously-insecure values so a fresh clone works.
 2. Checkout with `product: "pack"` reserves four assets (chosen + three `pending`) and stores
    the product on the **session record**. The job does not record a paid product yet.
 3. The webhook reads the product/amount from that session record (never the request body),
-   marks the job paid, sets `product`, `paidAmountCents` and unlocks the chosen asset.
+   marks the job paid, sets `product`, `paidAmountCents` and unlocks the chosen asset. The
+   event id is claimed atomically (SET NX) before any side effect, so simultaneous duplicate
+   deliveries record exactly one sale.
 4. `/success` calls `POST /api/jobs/[id]/expand` once per pending card, showing per-card
-   loading/failed/retry states. Each call atomically claims **one** style, so the client and
-   the cron can never generate the same style twice and the chosen style is never regenerated.
-5. `GET /api/cron/expand-packs` does the same for paid packs older than 60 s, bounded per run,
-   for visitors who close the tab.
+   loading/failed/retry states. Each call atomically claims **one** style with a TTL of
+   `2 × GENERATION_TIMEOUT_MS + 30 s`, so the client and the cron can never generate the same
+   style twice; a crashed claim or a `generating` asset older than one timeout is reclaimed.
+5. `GET /api/cron/expand-packs` does the same for paid packs older than 60 s, for visitors who
+   close the tab. It is bounded to three assets per run and declares `maxDuration = 420`, which
+   fits three full generation budgets plus overhead. If your plan caps function duration below
+   420 s, lower `GENERATION_TIMEOUT_MS` (three assets × two attempts must fit) or reduce
+   `MAX_EXPANSIONS_PER_RUN`; a killed run is recoverable through the claim TTL.
 
 A single purchase keeps exactly one asset. Failed extra styles show a retry action that
 regenerates only that style; other cards stay downloadable and no preview quota or payment

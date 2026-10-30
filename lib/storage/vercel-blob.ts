@@ -1,20 +1,43 @@
-import type { Storage } from "./types";
+import { StorageError, type Storage } from "./types";
 
 const API_ROOT = "https://blob.vercel-storage.com";
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 /**
- * Vercel Blob driver. Production only; exercised by configuration, not by the
- * test suite (no token in this increment). Private objects are read back with
- * the token, so no public URL ever leaks a full-resolution file.
+ * Vercel Blob driver. Production only. Every request is bounded by a timeout so
+ * a hanging blob service cannot block a serverless function; failures are typed
+ * so callers can return a retryable user error.
  */
 export class VercelBlobStorage implements Storage {
   constructor(
     private readonly token: string,
     private readonly apiRoot = API_ROOT,
+    private readonly timeoutMs = DEFAULT_TIMEOUT_MS,
   ) {}
 
+  private async request(url: string, init: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      if ((error as Error)?.name === "AbortError") {
+        throw new StorageError(
+          "timeout",
+          `Blob request timed out after ${this.timeoutMs} ms`,
+        );
+      }
+      throw new StorageError(
+        "network",
+        `Blob request failed: ${(error as Error)?.message ?? "network error"}`,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async put(key: string, data: Buffer, contentType = "application/octet-stream") {
-    const response = await fetch(`${this.apiRoot}/${key}`, {
+    const response = await this.request(`${this.apiRoot}/${key}`, {
       method: "PUT",
       headers: {
         authorization: `Bearer ${this.token}`,
@@ -26,12 +49,16 @@ export class VercelBlobStorage implements Storage {
       body: new Uint8Array(data),
     });
     if (!response.ok) {
-      throw new Error(`Blob upload failed: ${response.status}`);
+      throw new StorageError(
+        "http",
+        `Blob upload failed: ${response.status}`,
+        response.status,
+      );
     }
   }
 
   async get(key: string): Promise<Buffer | null> {
-    const response = await fetch(`${this.apiRoot}/${key}`, {
+    const response = await this.request(`${this.apiRoot}/${key}`, {
       headers: {
         authorization: `Bearer ${this.token}`,
         "x-api-version": "7",
@@ -39,13 +66,17 @@ export class VercelBlobStorage implements Storage {
     });
     if (response.status === 404) return null;
     if (!response.ok) {
-      throw new Error(`Blob download failed: ${response.status}`);
+      throw new StorageError(
+        "http",
+        `Blob download failed: ${response.status}`,
+        response.status,
+      );
     }
     return Buffer.from(await response.arrayBuffer());
   }
 
   async delete(key: string): Promise<void> {
-    const response = await fetch(`${this.apiRoot}/delete`, {
+    const response = await this.request(`${this.apiRoot}/delete`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${this.token}`,
@@ -55,7 +86,11 @@ export class VercelBlobStorage implements Storage {
       body: JSON.stringify({ urls: [`${this.apiRoot}/${key}`] }),
     });
     if (!response.ok && response.status !== 404) {
-      throw new Error(`Blob delete failed: ${response.status}`);
+      throw new StorageError(
+        "http",
+        `Blob delete failed: ${response.status}`,
+        response.status,
+      );
     }
   }
 }

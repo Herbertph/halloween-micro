@@ -61,32 +61,43 @@ function footerSvg(width: number, height: number, host: string): string {
   </svg>`;
 }
 
+interface NormalizedImage {
+  data: Buffer;
+  width: number;
+  height: number;
+}
+
+/** Applies EXIF orientation before the dimensions are measured. */
+async function normalizeSource(buffer: Buffer): Promise<NormalizedImage> {
+  const { data, info } = await sharp(buffer, { failOn: "none" })
+    .rotate()
+    .jpeg({ quality: 95 })
+    .toBuffer({ resolveWithObject: true });
+  if (!info.width || !info.height) throw new Error("share_source_invalid");
+  return { data, width: info.width, height: info.height };
+}
+
 async function encodeComposite(
   original: Buffer,
   portrait: Buffer,
   host: string,
 ): Promise<Buffer> {
-  const [leftMeta, rightMeta] = await Promise.all([
-    sharp(original, { failOn: "none" }).rotate().metadata(),
-    sharp(portrait, { failOn: "none" }).rotate().metadata(),
+  const [leftSource, rightSource] = await Promise.all([
+    normalizeSource(original),
+    normalizeSource(portrait),
   ]);
-  if (!leftMeta.width || !leftMeta.height || !rightMeta.width || !rightMeta.height) {
-    throw new Error("share_source_invalid");
-  }
 
   const layout = shareLayout(
-    { width: leftMeta.width, height: leftMeta.height },
-    { width: rightMeta.width, height: rightMeta.height },
+    { width: leftSource.width, height: leftSource.height },
+    { width: rightSource.width, height: rightSource.height },
   );
 
   const [left, right] = await Promise.all([
-    sharp(original, { failOn: "none" })
-      .rotate()
+    sharp(leftSource.data)
       .resize({ width: layout.leftWidth, height: layout.imageHeight, fit: "fill" })
       .jpeg({ quality: 88 })
       .toBuffer(),
-    sharp(portrait, { failOn: "none" })
-      .rotate()
+    sharp(rightSource.data)
       .resize({ width: layout.rightWidth, height: layout.imageHeight, fit: "fill" })
       .jpeg({ quality: 88 })
       .toBuffer(),

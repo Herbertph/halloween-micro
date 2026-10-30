@@ -45,12 +45,27 @@ export async function incrementGenerations(
 }
 
 export async function recordSale(
-  input: { product: Product; amountCents: number },
+  input: { product: Product; amountCents: number; sessionId?: string },
   now: Date = new Date(),
-): Promise<void> {
+): Promise<boolean> {
   const day = dayKey(now);
+  const kv = getKv();
+
+  if (input.sessionId) {
+    // The marker is written before any counter. It is deliberately kept even if
+    // an increment fails: a retry can under-count, but it can never double the
+    // revenue or the sales figure.
+    const claimed = await kv.setIfAbsent(
+      `stats:sale:${input.sessionId}`,
+      "1",
+      TTL_SECONDS,
+    );
+    if (!claimed) return false;
+  }
+
   await increment(day, input.product === "pack" ? "sales_pack" : "sales_single");
   await increment(day, "revenue_cents", input.amountCents);
+  return true;
 }
 
 export async function readDayStats(day: string): Promise<DayStats> {

@@ -2,8 +2,8 @@
 
 - **Spec:** [`docs/specs/monster-pack-and-share.md`](../specs/monster-pack-and-share.md)
 - **Branch:** `feature/monster-pack-and-share`
-- **Commit under test:** `0fcd9cf` (implementation `0335fc1` + `26a965d`)
-- **Test run:** full test run (increment 2) plus the increment 1 regression
+- **Commit under test:** `4e1b114` (retest; first pass `0fcd9cf`, fixes `0d10649`, `697b5b0`, `79c0d4b`, `ebb2f0b`)
+- **Test run:** retest of #9, #10, #11 and #12 plus the increment 1 regression
 - **Frameworks:** Vitest + Testing Library (unit, route and component), Playwright (e2e, iPhone 13 + Pixel 7), Lighthouse (opt-in, `/` and `/create`)
 
 > **Naming note:** increment 1 also has AC-1..AC-28. In this document **AC-n means the increment 2 spec**, and the increment 1 regression is AC-26 only. The increment 1 test cases live in `haunted-portrait-mvp.md`; its tests keep their names.
@@ -19,9 +19,9 @@
 | AC-5 | MP-8 | Pass |
 | AC-6 | MP-9 | Pass |
 | AC-7 | MP-10 | Pass |
-| AC-8 | MP-11, MP-12 | **Fail (#11)** |
+| AC-8 | MP-11, MP-12 | Pass (fixed #11) |
 | AC-9 | MP-13, MP-14 | Pass |
-| AC-10 | MP-15, MP-16, MP-17 | **Fail (#9)** |
+| AC-10 | MP-15, MP-16, MP-17 | Pass (fixed #9) |
 | AC-11 | MP-18 | Pass |
 | AC-12 | MP-19 | Pass |
 | AC-13 | MP-20, MP-21 | Pass |
@@ -40,9 +40,9 @@
 | AC-26 | MP-37 | Pass |
 | AC-27 | MP-38 | Pass |
 | AC-28 | MP-40 | Pass |
-| AC-29 | MP-36 | **Fail (#12)** |
+| AC-29 | MP-36 | Pass (fixed #12) |
 | AC-30 | MP-41 | Pass |
-| FR-9 (operational) | MP-39 | **Fail (#10)** |
+| FR-9 (operational) | MP-39 | Pass (fixed #10) |
 
 ## Test cases
 
@@ -198,7 +198,7 @@
   2. Read `readDayStats(dayKey())` and the job.
 - **Expected result:** Both 200; job unlocked once; `salesPack: 1`; `revenueCents: 899`.
 - **Automated by:** `tests/routes/pack.test.ts` › `AC-8: two simultaneous deliveries of the same event record one sale`
-- **Status:** **Fail (#11)** — `salesPack: 2`, revenue 1798; the idempotency marker is written after `recordSale`.
+- **Status:** Pass — verified in `4e1b114`; one sale, revenue 899, job unlocked once. (Originally failed as #11.)
 
 ### MP-13: Concurrent expand calls claim distinct styles and never duplicate work
 - **Acceptance criterion:** AC-9
@@ -248,21 +248,20 @@
   2. Read the job.
 - **Expected result:** The stale generating style is reclaimed and the job ends with four ready assets.
 - **Automated by:** `tests/routes/pack.test.ts` › `AC-10: the sweeper recovers a pack asset left generating by a crashed worker`
-- **Status:** **Fail (#9)** — `expandJob()` only considers `pending`; the asset stays generating forever.
+- **Status:** Pass — verified in `4e1b114`; a `generating` asset older than one timeout is reclaimed. (Originally failed as #9.)
 
 ### MP-17: A stale claim left by a crash does not strand a pending style
 - **Acceptance criterion:** AC-10
 - **Priority:** high
 - **Type:** negative
-- **Preconditions:** Paid pack job older than 60 s; one pending style already present in `claims:<jobId>`.
-- **Test data:** A claim with no TTL.
+- **Preconditions:** Paid pack job older than 60 s; one pending style with a `claim:<jobId>:<styleId>` key and a short TTL, plus a legacy `claims:<jobId>` set for upgrade compatibility.
+- **Test data:** A short-TTL claim (1 s) and a legacy set member.
 - **Steps:**
-  1. Add the pending style to the claim set.
-  2. Run `sweepPacks()`.
-  3. Read the job.
-- **Expected result:** The stale claim is reclaimed and the style becomes ready.
-- **Automated by:** `tests/routes/pack.test.ts` › `AC-10: a stale claim left by a crash does not strand a pending style`
-- **Status:** **Fail (#9)** — the claim set never expires; `setAddIfAbsent` refuses the retry.
+  1. Create the claim key with a 1 s TTL, wait for expiry, run `sweepPacks()`.
+  2. Repeat with the legacy set member.
+- **Expected result:** The expired claim and the legacy set member never block the pending style; the job ends with all four ready.
+- **Automated by:** `tests/routes/pack.test.ts` › `AC-10: a crashed TTL claim is reclaimed after it expires` and `AC-10: a legacy claim set from the previous release does not block a pending style`
+- **Status:** Pass — verified in `4e1b114`. (Originally failed as #9.)
 
 ### MP-18: One failed style is retried without regenerating the ready ones
 - **Acceptance criterion:** AC-11
@@ -506,7 +505,7 @@
   2. Run the script and the bundle test with fake values.
 - **Expected result:** The command scans both new secrets and reports clean only if none appear.
 - **Automated by:** `tests/unit/bundle.test.ts` › `AC-29: Turnstile secret, admin password, download/share secrets and prompts stay server-side` and `AC-29: the check:secrets script scans the increment 2 secrets`; `npm run check:secrets`
-- **Status:** **Fail (#12)** — the script omits `TURNSTILE_SECRET_KEY` and `ADMIN_PASSWORD`; the bundle test passes with fake values.
+- **Status:** Pass — verified in `4e1b114`; the script scans both new secrets and the bundle test stays green. (Originally failed as #12.)
 
 ### MP-37: The full increment 1 regression stays green
 - **Acceptance criterion:** AC-26
@@ -518,7 +517,7 @@
   1. Run `npm test` and `npm run e2e`.
 - **Expected result:** All increment 1 tests pass with no flaky test; the new increment 2 tests are additive.
 - **Automated by:** the existing `tests/**` and `e2e/journey.spec.ts` / `e2e/heic.spec.ts` / `e2e/security.spec.ts` suites
-- **Status:** Pass — 126/130 unit/route tests pass (the 4 failures are the new increment 2 findings), and the e2e suite passes 32/36 (4 Lighthouse skips, opt-in run passes).
+- **Status:** Pass — 131/131 unit/route tests pass; the e2e suite passes 32/36 (4 Lighthouse skips, opt-in run 2/2 passes).
 
 ### MP-38: A pack purchase completes on both mobile viewports
 - **Acceptance criterion:** AC-27
@@ -545,7 +544,7 @@
   2. Compare with the generation budget.
 - **Expected result:** A run fits the deployment's function duration, or expands one asset per invocation; a killed run cannot strand an asset (see #9).
 - **Automated by:** static inspection (no route-level duration test)
-- **Status:** **Fail (#10)** — no `maxDuration`; up to 4 × 120 s per request.
+- **Status:** Pass — verified in `4e1b114`; `maxDuration = 420`, `MAX_EXPANSIONS_PER_RUN = 3`, and a killed run is recoverable through the claim TTL. (Originally failed as #10.)
 
 ### MP-40: Lighthouse and axe budgets
 - **Acceptance criterion:** AC-28

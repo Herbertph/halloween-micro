@@ -379,7 +379,31 @@ describe("pack purchase", () => {
     expect(after?.assets?.every((asset) => asset.status === "ready")).toBe(true);
   });
 
-  it("AC-10: a stale claim left by a crash does not strand a pending style", async () => {
+  it("AC-10: a crashed TTL claim is reclaimed after it expires", async () => {
+    const { job } = await makePaidPackJob({
+      paidAt: new Date(Date.now() - 120_000),
+    });
+    const current = await loadJob(job.id);
+    const pending = (current!.assets ?? []).find(
+      (asset) => asset.status === "pending",
+    );
+    expect(pending).toBeTruthy();
+    // Simulate a worker that claimed the style and died; the short TTL expires.
+    const claimed = await getKv().setIfAbsent(
+      `claim:${job.id}:${pending!.styleId}`,
+      "crashed-token",
+      1,
+    );
+    expect(claimed).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+
+    await sweepPacks();
+
+    const after = await loadJob(job.id);
+    expect(after?.assets?.every((asset) => asset.status === "ready")).toBe(true);
+  });
+
+  it("AC-10: a legacy claim set from the previous release does not block a pending style", async () => {
     const { job } = await makePaidPackJob({
       paidAt: new Date(Date.now() - 120_000),
     });

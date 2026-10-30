@@ -245,17 +245,21 @@ by name only.
 
 - `GET /api/health` returns `200 { ready: true, mode: "live" | "demo" }` or
   `503 { ready: false, problems: [...] }`. It never returns a configuration value.
-- A deliberate demo deploy sets `ALLOW_MOCK_PROVIDERS=true`. It keeps the mock flow working
-  and renders **“Demo — no real payment”** in the header, on the paywall and on the success
-  page. Never use it to take money.
+- A deliberate demo deploy sets `ALLOW_MOCK_PROVIDERS=true` **and keeps
+  `PAYMENT_PROVIDER=mock`**. It keeps the mock flow working and renders “Demo — no real
+  payment” in the header, on the paywall and on the success page. With a real payment
+  provider the flag cannot relax any check or show the label: the normal live rules apply.
+  Never use a demo deploy to take money.
 - `npm run verify:providers` probes only configured services (Gemini, Stripe, Blob, Upstash,
   Turnstile), prints `PASS` / `FAIL` / `SKIP` and exits non-zero if a configured service
-  fails. `npm run verify:providers:dry` (or `node scripts/verify-providers.mjs --dry-run`)
+  fails. The Gemini probe requires an actual inline image part, not just HTTP 200.
+  `npm run verify:providers:dry` (or `node scripts/verify-providers.mjs --dry-run`)
   validates environment shape without any network call. Output is centrally redacted; secrets
   and tokens never appear, even in verbose/crash paths.
 - `npm test` includes Blob and Upstash integration tests against an ephemeral local HTTP
   stub (success, 4xx, timeout and the pack-claim conditional delete), so the production
-  drivers are exercised offline.
+  drivers are exercised offline. Both drivers bound every request with a timeout and raise
+  typed errors instead of hanging a function.
 
 ## Deploying to Vercel
 

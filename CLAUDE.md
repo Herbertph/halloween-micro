@@ -88,7 +88,8 @@ scripts/                asset/fixture generators, secret scan, provider verifier
 
 ## Project rules
 
-- **Production refuses mocks by default.** `lib/config-check.ts` gates `/api/generate` and `/api/checkout` with 503 `misconfigured`; `ALLOW_MOCK_PROVIDERS=true` is only for a labelled demo. Never bypass the guard in an API route.
+- **Production refuses mocks by default.** `lib/config-check.ts` gates `/api/generate` and `/api/checkout` with 503 `misconfigured`; `ALLOW_MOCK_PROVIDERS=true` only creates a labelled demo when `PAYMENT_PROVIDER=mock`, and never relaxes checks or the label with a real payment provider. Never bypass the guard in an API route.
+- **Every external driver is bounded.** Blob and Upstash must keep a request timeout and typed errors; a hung provider must reject, not block the function.
 - **Health exposes names, never values.** `/api/health` may list missing variables and driver names, never keys or secrets.
 - **The provider verifier must stay offline-testable and redacted.** Keep the HTTP layer injectable, call nothing in `--dry-run`, and run every printed string through `redact()`.- **Money comes from the server.** The client only names `product` (`single`/`pack`); the price is read from env and the product/amount are stored on the session record. The job records its paid product only in the webhook.
 - **Pack extras are post-payment only.** Never generate, preview or store a pending style before the verified webhook. Each style claim is an atomic KV key with a TTL (`2 × GENERATION_TIMEOUT_MS + 30 s`); the success page and cron must share that path, `generating` assets older than one timeout are reclaimable, and the chosen style is never regenerated.

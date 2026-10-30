@@ -48,8 +48,9 @@ Do these in order; each one produces values that go into the Vercel environment 
    `PAYMENT_PROVIDER=stripe`, `IMAGE_PROVIDER=gemini`, `STORAGE_DRIVER=vercel-blob`,
    `KV_DRIVER=upstash`, both Stripe price ids, `DOWNLOAD_SIGNING_SECRET`,
    `MOCK_WEBHOOK_SECRET`, `CRON_SECRET`, `ADMIN_PASSWORD`. Keep
-   `ALLOW_MOCK_PROVIDERS=false`; the server refuses mock/local configuration in production
-   unless that flag deliberately turns the deploy into a labelled demo.
+   `ALLOW_MOCK_PROVIDERS=false`; the server refuses mock/local configuration in production.
+   A demo is only allowed with `ALLOW_MOCK_PROVIDERS=true` **and**
+   `PAYMENT_PROVIDER=mock`; it then shows the “Demo — no real payment” label.
 4. Check the function duration limit of the plan. The preview request can run up to ~130 s
    and the pack cron declares 420 s. If the plan caps lower, tell the team before launch:
    the fallback is moving generation to a job queue.

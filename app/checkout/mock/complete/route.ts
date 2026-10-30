@@ -45,14 +45,18 @@ export async function POST(request: Request): Promise<Response> {
     getPaymentsProvider(),
   );
   if (!result.ok) {
-    return Response.redirect(
-      new URL(`/create?job=${session.jobId}&cancelled=1`, request.url),
-      303,
-    );
+    // Relative Location keeps the redirect on the submitting origin, which a
+    // strict `form-action 'self'` CSP accepts behind proxies and alternate hosts.
+    return new Response(null, {
+      status: 303,
+      headers: { location: `/create?job=${session.jobId}&cancelled=1` },
+    });
   }
 
-  return Response.redirect(
-    new URL(`/success?session_id=${encodeURIComponent(session.id)}`, request.url),
-    303,
-  );
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location: `/success?session_id=${encodeURIComponent(session.id)}`,
+    },
+  });
 }

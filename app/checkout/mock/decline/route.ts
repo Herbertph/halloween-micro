@@ -21,8 +21,8 @@ export async function POST(request: Request): Promise<Response> {
 
   await setSessionStatus(session.id, "declined");
 
-  return Response.redirect(
-    new URL(`/create?job=${session.jobId}&declined=1`, request.url),
-    303,
-  );
+  return new Response(null, {
+    status: 303,
+    headers: { location: `/create?job=${session.jobId}&declined=1` },
+  });
 }

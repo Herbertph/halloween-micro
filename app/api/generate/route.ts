@@ -13,6 +13,10 @@ import { getImageProvider } from "@/lib/providers/image";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Generation currently runs inside this request (FR-12 deviation, issue #5) and
+// can take one 60 s attempt plus one retry. Raise GENERATION_TIMEOUT_MS only
+// after checking this bound; a real async job queue would remove this coupling.
+export const maxDuration = 120;
 
 export async function POST(request: Request): Promise<Response> {
   try {
@@ -21,6 +25,16 @@ export async function POST(request: Request): Promise<Response> {
     const input = await parseGenerateRequest(request, ipHash);
     if (!detectImageType(input.image)) {
       throw new ApiError("unsupported_format", 400);
+    }
+
+    // Decode and strip EXIF/GPS before any budget is consumed or anything is
+    // stored: a corrupt image is a typed 4xx and must not burn the visitor's
+    // preview allowance or the daily cap.
+    let stripped: Buffer;
+    try {
+      stripped = await stripMetadata(input.image);
+    } catch {
+      throw new ApiError("invalid_image", 400);
     }
 
     const limit = await consumePreviewAttempt(ipHash);
@@ -40,9 +54,6 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const job = await createJob({ styleId: input.styleId, ipHash });
-
-    // Strip EXIF/GPS before anything is stored or sent to a provider.
-    const stripped = await stripMetadata(input.image);
     const storage = getStorage();
     const originalKey = `blobs/${randomUUID()}.jpg`;
     await storage.put(originalKey, stripped, "image/jpeg");

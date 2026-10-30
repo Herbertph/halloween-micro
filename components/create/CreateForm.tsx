@@ -44,6 +44,7 @@ const PROVIDER_MESSAGES: Record<string, string> = {
 const API_MESSAGES: Record<string, string> = {
   file_too_large: UPLOAD_MESSAGES.file_too_large,
   unsupported_format: UPLOAD_MESSAGES.unsupported_format,
+  invalid_image: "We couldn't read that photo. Try a JPG, PNG or WEBP.",
   consent_required: "Please confirm you own the photo or have permission to use it.",
   invalid_style: "Pick one of the five styles.",
   capacity: "We're at capacity today. Please come back tomorrow.",
@@ -267,7 +268,7 @@ export function CreateForm({
             <div>
               <label
                 htmlFor="photo"
-                className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-white/25 bg-ink/50 px-5 py-10 text-center transition hover:border-ember/60"
+                className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-white/25 bg-ink/50 px-5 py-10 text-center hover:border-ember/60 focus-within:border-ember focus-within:ring-2 focus-within:ring-ember/50 focus-within:ring-offset-2 focus-within:ring-offset-ink"
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => {
                   event.preventDefault();

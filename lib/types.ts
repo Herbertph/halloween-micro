@@ -70,6 +70,7 @@ export type ApiErrorCode =
   | "file_missing"
   | "file_too_large"
   | "unsupported_format"
+  | "invalid_image"
   | "invalid_style"
   | "rate_limited"
   | "capacity"

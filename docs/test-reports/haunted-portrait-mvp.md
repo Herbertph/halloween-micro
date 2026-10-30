@@ -1,8 +1,8 @@
 # Test report — Haunted Portrait MVP (increment 1)
 
-- **Mode:** full test run (first QA pass)
+- **Mode:** retest after the fixes for #1, #2, #3, #4 and #6
 - **Branch:** `feature/haunted-portrait-mvp`
-- **Commit:** `23e9426`
+- **Commit:** `85537c7` (first QA pass was `23e9426`; first-pass tests are in `6ea73af`)
 - **Spec:** [`docs/specs/haunted-portrait-mvp.md`](../specs/haunted-portrait-mvp.md)
 - **Test cases:** [`docs/test-cases/haunted-portrait-mvp.md`](../test-cases/haunted-portrait-mvp.md)
 - **Date:** 2026-10-30
@@ -12,144 +12,148 @@
 
 **FAIL**
 
-All 28 acceptance criteria were exercised. 24 pass. Four fail:
+The five fixes requested for retest are verified: **#1, #2, #3, #4 and #6 are fixed**, and all 28 acceptance criteria now pass. The full unit/route suite is green (73/73), and the e2e suite is green apart from one new regression.
 
-- **AC-16 / AC-17** — the per-IP limit and the daily cap are bypassed by parallel requests (critical, #2).
-- **AC-20** — concurrent jobs are lost from the cleanup index, so their photos are never deleted after 48 h (critical, #1).
-- **AC-25** — keyboard focus on the photo upload control is invisible (major, #3).
+The new CSP from #6 (`a771baa`) blocks `heic2any`'s WASM worker in production. A real HEIC upload now hangs on "Getting your photo ready…" indefinitely, with no preview and no fallback message (issue **#7**, major). The same fixture converts correctly in `next dev`, where the CSP allows `'unsafe-eval'`. The new test `e2e/heic.spec.ts` reproduces it on both viewports, so the e2e suite fails.
 
-Two further spec deviations are open as minor issues: corrupt-image 4xx handling (#4) and the inline generation flow in FR-12 (#5), plus a security-header hardening gap (#6).
+**#5** remains open by design: FR-12 generation is still synchronous, now bounded by `maxDuration = 120` and documented in the README. It waits for the Analyst's decision.
 
-The happy path itself is solid: the whole upload → preview → pay → unlock → download journey passes on both mobile viewports, the mock preview is watermarked and ≤512 px, no full-resolution key or URL leaks, the webhook is signed and idempotent, and the 48-hour single-job cleanup works.
+## Retest verification
+
+| Issue | Status at `85537c7` | Evidence |
+|---|---|---|
+| #1 cleanup index race | **Fixed** | `tests/routes/cleanup-concurrency.test.ts` › `AC-20/FR-31: cleanup deletes the objects of every expired job created at the same time` passes (20/20 jobs swept); index is an atomic set and ids are pruned after purge. |
+| #2 parallel limits | **Fixed** | `tests/unit/limits.test.ts` › `AC-16: parallel attempts…` and `AC-17: parallel requests…` each allow exactly 3 of 10. Atomic rolling-window add (disk lock / Upstash Lua) and atomic `INCR`. |
+| #3 invisible focus | **Fixed** | `e2e/accessibility.spec.ts` › `AC-25: keyboard focus is visible on the upload control` passes on both viewports; the label now has `focus-within` border + ring. |
+| #4 corrupt image 500 | **Fixed** | `tests/routes/generate.test.ts` › `FR-9: a corrupt JPEG…` passes with 400 `invalid_image`; decode happens before quota is consumed; provider not called. |
+| #5 FR-12 synchronous generation | **Open, deferred** | Still synchronous; `maxDuration = 120` and a README section were added in `05a0c24`. No AC regression (AC-19/AC-26 pass). Awaiting the Analyst. |
+| #6 security headers | **Fixed** | `e2e/security.spec.ts` passes; headers present on both viewports. The CSP caused the new #7 regression. |
+| #7 HEIC + CSP (new) | **Open** | `e2e/heic.spec.ts` fails on both viewports: upload hangs; console `EvalError` on `new Function`; the same fixture previews in dev. |
 
 ## Run results
 
-| Gate | Command | Result |
+| Gate | First pass `23e9426` | Retest `85537c7` |
 |---|---|---|
-| Lint | `npm run lint` | Pass (exit 0; 1 warning: unused `_input` in `lib/providers/payments/mock.ts:43`) |
-| Build | `npm run build` | **Pass** (17 routes compiled, no type errors) |
-| Unit / route / component | `npm test` | **Fail** — 18 files, 73 tests: 69 passed, 4 failed |
-| E2E | `npm run e2e` | **Fail** — 22 tests (2 projects): 18 passed, 2 failed, 2 skipped (Lighthouse is opt-in) |
-| Lighthouse | `RUN_LIGHTHOUSE=1 npx playwright test e2e/lighthouse.spec.ts --project=iphone` | **Pass** (perf ≥ 85, a11y ≥ 90) |
-| Secret scan | `npm run check:secrets` | **Pass** |
+| Lint | Pass (1 warning: unused `_input`) | **Pass**, no warnings or errors |
+| Build | Pass | **Pass** (17 routes, no type errors) |
+| Unit / route / component | Fail — 73 tests: 69 passed, 4 failed | **Pass** — 73/73 |
+| E2E | Fail — 22 tests: 18 passed, 2 failed, 2 skipped | **Fail** — 26 tests: 22 passed, 2 failed (`TC-40`, #7), 2 skipped (Lighthouse opt-in) |
+| Lighthouse | Pass | **Pass** (`RUN_LIGHTHOUSE=1 … --project=iphone`) |
+| Secret scan | Pass | **Pass** |
 
-The 4 Vitest failures and the 2 Playwright failures are deterministic: the failing unit/route tests were re-run and failed again, and the focus test fails on both the iPhone and Android projects. **No flaky tests** were observed.
+The two e2e failures are the same deterministic HEIC test on both viewports. For the record, the first pass also ran Lighthouse separately (pass); no run produced a flaky result.
 
 ## Traceability and results
 
-| AC | Test cases | Result |
-|---|---|---|
-| AC-1 | TC-1 | Pass |
-| AC-2 | TC-2, TC-3 | Pass |
-| AC-3 | TC-4 | Pass |
-| AC-4 | TC-5, TC-6 | Pass |
-| AC-5 | TC-7, TC-8 | Pass |
-| AC-6 | TC-9, TC-10 | Pass |
-| AC-7 | TC-11 | Pass |
-| AC-8 | TC-12 | Pass |
-| AC-9 | TC-13 | Pass |
-| AC-10 | TC-14 | Pass |
-| AC-11 | TC-15 | Pass |
-| AC-12 | TC-16 | Pass |
-| AC-13 | TC-17 | Pass |
-| AC-14 | TC-18 | Pass |
-| AC-15 | TC-19 | Pass |
-| AC-16 | TC-20, TC-31 | **Fail (#2)** |
-| AC-17 | TC-21, TC-32 | **Fail (#2)** |
-| AC-18 | TC-22 | Pass |
-| AC-19 | TC-23 | Pass |
-| AC-20 | TC-24, TC-33 | **Fail (#1)** |
-| AC-21 | TC-25 | Pass |
-| AC-22 | TC-26 | Pass |
-| AC-23 | TC-27 | Pass |
-| AC-24 | TC-28 | Pass (opt-in) |
-| AC-25 | TC-29, TC-30 | **Fail (#3)** |
-| AC-26 | TC-34 | Pass (iPhone 13 + Pixel 7) |
-| AC-27 | TC-35 | Pass |
-| AC-28 | TC-36 | Pass |
-| FR-9 | TC-37 | **Fail (#4)** |
-| FR-12 | TC-38 | **Fail (#5)** |
-| Security headers | TC-39 | **Fail (#6)** |
+| AC | Test cases | First pass | Retest `85537c7` |
+|---|---|---|---|
+| AC-1 | TC-1 | Pass | Pass |
+| AC-2 | TC-2, TC-3 | Pass | Pass |
+| AC-3 | TC-4 | Pass | Pass |
+| AC-4 | TC-5, TC-6 | Pass | Pass |
+| AC-5 | TC-7, TC-8 | Pass | Pass |
+| AC-6 | TC-9, TC-10 | Pass | Pass |
+| AC-7 | TC-11 | Pass | Pass |
+| AC-8 | TC-12 | Pass | Pass |
+| AC-9 | TC-13 | Pass | Pass |
+| AC-10 | TC-14 | Pass | Pass |
+| AC-11 | TC-15 | Pass | Pass |
+| AC-12 | TC-16 | Pass | Pass |
+| AC-13 | TC-17 | Pass | Pass |
+| AC-14 | TC-18 | Pass | Pass |
+| AC-15 | TC-19 | Pass | Pass |
+| AC-16 | TC-20, TC-31 | **Fail (#2)** | **Pass** |
+| AC-17 | TC-21, TC-32 | **Fail (#2)** | **Pass** |
+| AC-18 | TC-22 | Pass | Pass |
+| AC-19 | TC-23 | Pass | Pass |
+| AC-20 | TC-24, TC-33 | **Fail (#1)** | **Pass** |
+| AC-21 | TC-25 | Pass | Pass |
+| AC-22 | TC-26 | Pass | Pass |
+| AC-23 | TC-27 | Pass | Pass |
+| AC-24 | TC-28 | Pass | Pass |
+| AC-25 | TC-29, TC-30 | **Fail (#3)** | **Pass** |
+| AC-26 | TC-34 | Pass | Pass (iPhone 13 + Pixel 7) |
+| AC-27 | TC-35 | Pass | Pass |
+| AC-28 | TC-36 | Pass | Pass |
+| FR-9 | TC-37 | **Fail (#4)** | **Pass** |
+| FR-7 | TC-40 | not covered | **Fail (#7)** |
+| FR-12 | TC-38 | **Fail (#5)** | **Fail (#5)**, deferred |
+| Security headers | TC-39 | **Fail (#6)** | **Pass** |
 
-The full test-case detail, data and automation mapping is in [`docs/test-cases/haunted-portrait-mvp.md`](../test-cases/haunted-portrait-mvp.md).
+Full detail, data and automation mapping: [`docs/test-cases/haunted-portrait-mvp.md`](../test-cases/haunted-portrait-mvp.md).
 
-## Issues opened
+## Issues
 
-| Issue | Severity | Summary |
-|---|---|---|
-| #1 | critical | Concurrent generations are lost from the cleanup index, so their photos are never deleted after 48 h |
-| #2 | critical | Parallel requests bypass the per-IP preview limit and the daily generation cap |
-| #3 | major | Keyboard focus on the upload control is invisible |
-| #4 | minor | A corrupt image with valid magic bytes returns 500 instead of a typed 4xx |
-| #5 | minor | Generation runs inline in `POST /api/generate` instead of as a polled job (FR-12 deviation) |
-| #6 | minor | Production responses have no security headers (CSP, X-Frame-Options, nosniff, Referrer-Policy) |
+| Issue | Severity | Summary | Status at `85537c7` |
+|---|---|---|---|
+| #1 | critical | Concurrent generations are lost from the cleanup index, so their photos are never deleted after 48 h | **Verified fixed** (comment) |
+| #2 | critical | Parallel requests bypass the per-IP preview limit and the daily generation cap | **Verified fixed** (comment) |
+| #3 | major | Keyboard focus on the upload control is invisible | **Verified fixed** (comment) |
+| #4 | minor | A corrupt image with valid magic bytes returns 500 instead of a typed 4xx | **Verified fixed** (comment) |
+| #5 | minor | Generation runs inline in `POST /api/generate` instead of as a polled job (FR-12 deviation) | **Open, deferred** (comment; Analyst decision) |
+| #6 | minor | Production responses have no security headers (CSP, X-Frame-Options, nosniff, Referrer-Policy) | **Verified fixed** (comment), but caused #7 |
+| #7 | major | CSP blocks the HEIC decoder in production, so HEIC uploads hang with no fallback | **Open** (new regression from #6) |
 
-No duplicates existed before filing. No pre-existing issues were commented on or closed. Issues #1–#5 each received one follow-up comment correcting the test-case number quoted in the filed body (the test paths and names were correct); the mapping in the table above and in the test-case document is authoritative.
+No issue was closed (merging the PR does that). Issues #1–#5 each received one first-pass comment correcting the test-case number quoted in the filed body. The retest added a verification comment to #1–#4 and #6, a deferral comment to #5, and filed #7.
 
-## Root-cause notes for the developer
+## #7 — HEIC + CSP regression (TC-40, FR-7)
 
-### #1 — cleanup index race (AC-20, FR-31)
-`addToIndex()` in `lib/job-service.ts` reads `jobs:index`, appends, and writes the whole array. Concurrent `POST /api/generate` calls overwrite each other. Reproduced with 20 concurrent `createJob()` calls: 1 id indexed, 19 jobs invisible to `cleanupExpiredJobs()`. The lost jobs' objects are only purged if a visitor happens to access the job again — which most visitors never do. The same race exists with Upstash (`GET` + `SET`). Suggested direction: make the index append atomic in the KV interface (`RPUSH`/`SADD` for Upstash, an append-only file per job locally), or store a per-job retention key and give the sweeper an enumerable source of truth. Also consider removing ids after purge so the index does not grow forever.
+`next.config.ts` sets `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' …` in production. `'wasm-unsafe-eval'` permits WebAssembly compilation but not `new Function`, which `heic2any`'s Emscripten worker uses. On a production build, uploading `tests/fixtures/heic/example.heic` leaves the form on "Getting your photo ready…" forever; the worker throws `EvalError` and the outer `heic2any` promise never settles, so the `prepareImage` catch never shows the fallback. The identical fixture previews correctly in `next dev`, where the dev CSP adds `'unsafe-eval'`.
 
-### #2 — limits are not atomic (AC-16, AC-17, FR-29, FR-30)
-`consumePreviewAttempt()` and `consumeDailyGeneration()` both do `get` → compute → `set`. Ten parallel calls all see the old value: 10/10 allowed with a limit of 3 (both counters). A burst of uploads from one IP (or one attacker) reaches the image provider for every request, defeating the budget protection that the spec calls a success criterion. Make the KV boundary expose an atomic operation: `INCR` + `EXPIRE` for the daily cap, and a Redis sorted set / Lua script (or a per-attempt key + atomic count) for the rolling 24 h window. The existing sequential tests are good; keep them and add the parallel ones.
+Two viable fixes: allow the decoder (`'unsafe-eval'`, documented trade-off) or keep the strict CSP and make the HEIC path fail safely (try native `createImageBitmap` first, add a timeout around `heic2any`, and show the existing `decode_failed` message). Either way, keep `e2e/heic.spec.ts` green on both viewports.
 
-### #3 — invisible focus
-`components/create/CreateForm.tsx` hides the real file input with `sr-only`. The global `:focus-visible` outline is clipped with the 1 × 1 px input, and the label only styles `hover`. Add `focus-within:` styling to the label (border/ring) or make the input visible on focus. The test asserts that either the input has a perceivable box or the visible label changes.
+## First-pass findings (now fixed)
 
-## Code review (branch vs `main`)
+These are retained for history; the fixes are in commits `a44aa2e`, `565c470`, `4bcdbf6`, `a771baa`, `05a0c24` and `85537c7`.
 
-Reviewed the full diff of `feature/haunted-portrait-mvp` against `main` (6 commits, 111 files) with the five-axis checklist.
+- **#1 — cleanup index race (AC-20, FR-31).** `addToIndex()` read-modify-wrote a single `jobs:index` JSON array; concurrent jobs overwrote each other. 20 concurrent `createJob()` calls left 1 id indexed and 19 jobs invisible to `cleanupExpiredJobs()`. Fixed with an atomic set add, an atomic set membership read for the sweeper and id pruning after purge.
+- **#2 — non-atomic limits (AC-16, AC-17, FR-29, FR-30).** `consumePreviewAttempt()` and `consumeDailyGeneration()` did `get` → compute → `set`; 10 parallel calls all passed a limit of 3. Fixed with `addToRollingWindow` (in-process lock for disk, Lua for Redis) and atomic `INCR`.
+- **#3 — invisible focus.** The `sr-only` input's focus ring was clipped and the label had no focus styling. Fixed with `focus-within` border/ring.
+- **#4 — corrupt image.** `stripMetadata()` threw after the counters were consumed and the route returned 500 `fatal`. Fixed by decoding/stripping before quota and returning 400 `invalid_image`.
+- **#6 — security headers.** No CSP/XFO/nosniff/Referrer-Policy. Fixed in `next.config.ts` and `e2e/security.spec.ts`, but the CSP caused #7.
+
+## Fix review (`6ea73af`..`85537c7`)
 
 **Correctness**
-- The job state machine is one-way and validated; the public job projection never includes storage keys; the download token is HMAC-signed over job id, key and expiry, and the download route re-checks ownership, payment, expiry and key equality. Good.
-- The webhook is signature-verified and idempotent by event id before any state change; unknown jobs/events are ignored with 200. Good.
-- The concurrency defects above (#1, #2) are the main correctness findings.
-- The corrupt-decode path (#4) violates FR-9's typed-4xx rule.
-- `RetentionHours` is read at job creation, so changing the env later does not move existing expiries. That matches the spec (retention from upload) and is fine.
+- The atomic operations are implemented at the KV boundary, which is the right layer: disk uses a per-key lock and `wx` set files; Upstash uses `SADD`/`SREM`/`SMEMBERS` and a Lua script for the rolling window. The existing sequential tests still pass, and the parallel tests now pass.
+- `getKv()` caches the driver per `DATA_DIR`/URL signature; fresh temp directories get a fresh instance. This is necessary for the lock map to work in tests.
+- The corrupt-image path now decodes before consuming quota, but **over-quota requests still perform the sharp decode** before they are rejected. A large/decompression-bomb upload from one IP can therefore consume CPU even after its limit is exhausted. This is a residual DoS consideration, not a filed regression; the provider budget is still protected.
+- `consumeDailyGeneration()` now increments first and allows while `current <= cap`. Refused attempts keep incrementing the counter (it resets by TTL), so the cap is still enforced; only the counter's value differs from the previous semantics.
+- CSP is applied globally. The journey, checkout redirects and success polling all still work; only the HEIC worker is blocked (#7).
 
-**Architecture**
-- The provider boundaries and the style config match the spec's contracts; `server-only` is used on `config/styles.ts` and `lib/env.ts`; prompts are not imported by client modules.
-- The KV interface is too weak for the limits and the cleanup index. This is the structural cause of #1 and #2, not two independent bugs. Add atomic primitives instead of trying to lock inside `lib/limits.ts`.
-- `lib/webhooks.ts` trusts `job_id` from the signed event metadata without checking that the event's session belongs to that job. With the mock checkout the two are created together, and with Stripe the metadata is written by our own adapter, so it is not exploitable today; still worth binding `sessionId` to `job.sessionId` as defense in depth.
-- `app/api/checkout/route.ts` also accepts `awaiting_payment` so a declined visitor can retry. This is a deliberate extension of FR-20; it is required by AC-12 and is documented in a comment.
+**Architecture / quality**
+- The atomic primitives make the limits and index code shorter and remove the read-modify-write pattern from application code. The rule is documented in `CLAUDE.md`.
+- The advertized `maxDuration = 120` is a real bound for the synchronous route; the README documents the FR-12 deviation and the proxy/XFF assumption. Good.
+- Canonicals are now per page; `/success` is `noindex`; the unused `DOWNLOAD_TOKEN_TTL_SECONDS`, the `_input` lint warning and the mislabelled AC-28 e2e comment are gone.
 
 **Security**
-- No secret or prompt text reached `.next/static`; `check:secrets` and the bundle test pass.
-- No full-resolution URL or storage key appears before payment. The paid download token embeds the key in its signed payload by design (FR-27); it is not a resolvable storage URL.
-- EXIF/GPS is stripped before storage and before the provider; verified at the route level.
-- Rate limiting keys on the first `x-forwarded-for` entry. Behind a proxy that does not overwrite the header this is spoofable, and the README does not document the required proxy setting (the spec's risk table asks for this). Add a deployment note.
-- No security headers (#6).
-- No `npm audit` gate in CI; consider adding one before launch.
+- CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy and Permissions-Policy are present; the mock checkout redirects use relative `Location` values so `form-action 'self'` does not block them.
+- The CSP's `script-src` uses `'unsafe-inline'` (needed by Next's inline bootstrap) and `'wasm-unsafe-eval'` (needed by WASM); it deliberately omits `'unsafe-eval'`, which is what breaks `heic2any`.
+- No secret or prompt text in `.next/static`; `check:secrets` clean.
+- The XFF handling is now documented, which closes the first-pass documentation gap.
+- No `npm audit` gate in CI; still recommended before launch.
 
-**Performance**
-- Inline generation (#5) holds the request for the provider duration and is the main production risk once Gemini is enabled.
-- The cleanup index is O(n) over every job ever created and is never pruned; a day at the 2000 cap is fine, but it grows without bound if the product runs longer. Prune ids after purge.
-- The preview endpoint caches for 60 s; the job/success endpoints use `no-store`. Fine.
-
-**Readability / nits (reported, not filed as issues)**
-- `lib/env.ts` exports `DOWNLOAD_TOKEN_TTL_SECONDS` (15 min) which is unused; `lib/tokens.ts` defines `DOWNLOAD_TOKEN_TTL_MS` separately. Keep one source of truth.
-- Lint warning: `_input` unused in `lib/providers/payments/mock.ts:43`.
-- `e2e/journey.spec.ts:31` comments the expiry-notice block as "AC-28"; the expiry notice is FR-28 and AC-28 is the env-variable check. Fix the comment.
-- `/privacy` and `/terms` inherit `alternates.canonical: "/"` from the root layout and thus declare the home page as their canonical. They are also statically rendered, so `NEXT_PUBLIC_SITE_URL` is baked in at build time (observed: `/` used the runtime `127.0.0.1:3200`, `/privacy` used the build-time `localhost:3000`). Give each page its own canonical and make sure the production build sets the site URL.
-- `CreateForm.tsx` is 400+ lines; it is cohesive today, but if the inline-generation flow (#5) becomes polling, extract the polling/checkout state into a hook rather than growing it further.
+**Nits**
+- `lib/env.ts` has a stray double blank line where the dead constant was removed.
+- `MockPaymentsProvider.createSession()` no longer declares its unused parameter; fine by interface arity, but it keeps the provider's contract less explicit than the Stripe adapter's.
+- The HEIC fixture is 718 KB. It is MIT-licensed (libheif examples) and documented in `tests/fixtures/heic/README.md`.
 
 ## Spec issues
 
-1. **FR-12 contradicts the implementation and has no acceptance criterion.** The spec requires 202 *while generating* plus client polling; the code returns 202 only after generation and the client never polls. AC-26 and AC-19 still pass with the fast mock. This needs a decision: implement FR-12 (and add an AC), or amend the spec to the synchronous design and set a serverless-safe `maxDuration`. Filed as #5.
-2. **AC-25 "visible focus" has no measurable definition.** I used the standard interpretation: the focused control must either have a perceivable box on screen or its visible wrapper must change on focus. The file input fails that; the rest of the controls pass. Worth putting that definition in the spec.
-3. **AC-16 / AC-17 do not say whether concurrent requests count.** Read sequentially they pass; read as "the limit protects the budget", they fail. I have treated the FR-29/FR-30 intent as authoritative. Clarify in the spec.
-4. **FR-27 says an expired or deleted token returns 410 "with a clear message".** The deleted-object case returns a human message; the expired-token case returns only `{"error":"token_expired"}`. Decide whether a machine code is enough.
-5. **AC-27's test is only as strong as the environment that runs it.** The bundle test scans for secret *values* present in the test process (and only checks prompt text when they are absent). A CI run without secret values would not detect a hard-coded default secret. Running `check:secrets` with representative fake values in CI closes the gap.
-6. **Assumption 8 mentions a "countdown"** but the feature is a static server-rendered banner; the spec's FR-2 wording is the one implemented. No action needed beyond wording.
+1. **FR-12 remains the known deviation (#5).** The spec requires 202 *while generating* plus client polling; the code is synchronous, now bounded by `maxDuration = 120`. The Analyst must decide whether to implement the async contract or amend the spec. No AC fails today.
+2. **AC-25 now passes.** The first pass asked for a measurable definition of "visible focus"; the fix uses the standard "the focused control or its visible wrapper changes" interpretation. Worth writing that definition into the spec.
+3. **AC-16 / AC-17 did not state concurrency semantics.** The first pass applied the FR-29/FR-30 intent (the limit must protect the budget), and the fix now enforces it under parallel requests. Add "including concurrent requests" to the ACs.
+4. **FR-7 does not say what happens when conversion is blocked by policy.** It says HEIC is best effort with a clear fallback when the browser cannot decode. #7 is a policy/CSP failure rather than a codec failure, and the current code neither converts nor shows the fallback. We treat it as a decoder failure and require the fallback.
+5. **FR-27 says an expired or deleted token returns 410 "with a clear message".** The deleted-object case returns a human message; the expired-token case returns only `{"error":"token_expired"}`. Unchanged from the first pass.
+6. **AC-27's test is only as strong as the environment that runs it.** It scans for secret values present in the test process; a CI run without values only checks prompt text. Unchanged.
+7. **Assumption 8 mentions a "countdown"** while FR-2 implements a static banner. Wording only.
 
 ## Flaky tests
 
-None. The failures above reproduced on re-run. The full suite was run once for the final numbers; the failing unit/route tests were re-run once to rule out flakiness, and the focus e2e test failed on both viewport projects.
+None. The two retest e2e failures are the same deterministic HEIC failure on both viewport projects; the Vitest suite is fully green.
 
 ## Next step
 
-Fix or explicitly defer the open issues, then send the branch back for a retest:
-
-- Must fix before merge: **#1**, **#2**, **#3**.
-- Decide before launch: **#4**, **#5**, **#6** (minor; #5 in particular before `IMAGE_PROVIDER=gemini` is enabled).
+- Fix **#7** (HEIC + CSP) and keep `e2e/heic.spec.ts` green on both viewports.
+- **#5** stays open for the Analyst's decision; no code change is required for the current ACs.
+- **#1, #2, #3, #4, #6** are verified fixed and can be closed by merging the PR.

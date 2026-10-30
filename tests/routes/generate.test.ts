@@ -155,7 +155,7 @@ describe("POST /api/generate", () => {
 
     expect(response.status).toBeGreaterThanOrEqual(400);
     expect(response.status).toBeLessThan(500);
-    expect(typeof body.error).toBe("string");
+    expect(body.error).toBe("invalid_image");
     expect(providerCalls.count).toBe(0);
   });
 

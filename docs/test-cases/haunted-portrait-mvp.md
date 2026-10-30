@@ -2,8 +2,8 @@
 
 - **Spec:** [`docs/specs/haunted-portrait-mvp.md`](../specs/haunted-portrait-mvp.md)
 - **Branch:** `feature/haunted-portrait-mvp`
-- **Commit under test:** `23e9426`
-- **Test run:** full test run (first QA pass)
+- **Commit under test:** `85537c7` (retest; first pass was `23e9426`)
+- **Test run:** retest after fixes for #1, #2, #3, #4, #6
 - **Frameworks:** Vitest + Testing Library (unit, route and component), Playwright (e2e, iPhone 13 + Pixel 7), Lighthouse (opt-in)
 
 ## Traceability summary
@@ -25,22 +25,23 @@
 | AC-13 | TC-17 | Pass |
 | AC-14 | TC-18 | Pass |
 | AC-15 | TC-19 | Pass |
-| AC-16 | TC-20, TC-31 | **Fail (#2)** |
-| AC-17 | TC-21, TC-32 | **Fail (#2)** |
+| AC-16 | TC-20, TC-31 | Pass |
+| AC-17 | TC-21, TC-32 | Pass |
 | AC-18 | TC-22 | Pass |
 | AC-19 | TC-23 | Pass |
-| AC-20 | TC-24, TC-33 | **Fail (#1)** |
+| AC-20 | TC-24, TC-33 | Pass |
 | AC-21 | TC-25 | Pass |
 | AC-22 | TC-26 | Pass |
 | AC-23 | TC-27 | Pass |
 | AC-24 | TC-28 | Pass |
-| AC-25 | TC-29, TC-30 | **Fail (#3)** |
+| AC-25 | TC-29, TC-30 | Pass |
 | AC-26 | TC-34 | Pass |
 | AC-27 | TC-35 | Pass |
 | AC-28 | TC-36 | Pass |
-| FR-9 (unhappy path) | TC-37 | **Fail (#4)** |
-| FR-12 | TC-38 | **Fail (#5)** |
-| Security review | TC-39 | **Fail (#6)** |
+| FR-9 (unhappy path) | TC-37 | Pass |
+| FR-7 (HEIC) | TC-40 | **Fail (#7)** |
+| FR-12 | TC-38 | **Fail (#5)** — deferred |
+| Security review | TC-39 | Pass |
 
 ## Test cases
 
@@ -439,7 +440,7 @@
   2. Compare the visible wrapper with its idle styling.
 - **Expected result:** The focused control (or its visible label) shows a clear focus indicator.
 - **Automated by:** `e2e/accessibility.spec.ts` › `AC-25: keyboard focus is visible on the upload control`
-- **Status:** **Fail (#3)** — the real input is 1 × 1 px and clipped; the label does not change. Fails on both viewports.
+- **Status:** Pass — verified in `85537c7`; the dropzone label shows the ember border/ring on focus-within. (Originally failed as #3.)
 
 ### TC-31: Parallel generations from one IP cannot exceed the rolling limit
 - **Acceptance criterion:** AC-16
@@ -451,7 +452,7 @@
   1. Fire all 10 calls with `Promise.all`.
 - **Expected result:** Exactly 3 allowed and 7 refused (the rolling limit must hold under concurrency, not only sequentially).
 - **Automated by:** `tests/unit/limits.test.ts` › `AC-16: parallel attempts from one IP cannot exceed the rolling limit`
-- **Status:** **Fail (#2)** — 10 of 10 allowed.
+- **Status:** Pass — verified in `85537c7`; exactly 3 of 10 allowed. (Originally failed as #2.)
 
 ### TC-32: Parallel generations cannot exceed the global daily cap
 - **Acceptance criterion:** AC-17
@@ -463,7 +464,7 @@
   1. Fire all 10 calls with `Promise.all`.
 - **Expected result:** Exactly 3 allowed and 7 refused; no provider call for rejected requests.
 - **Automated by:** `tests/unit/limits.test.ts` › `AC-17: parallel requests cannot exceed the global daily cap`
-- **Status:** **Fail (#2)** — 10 of 10 allowed.
+- **Status:** Pass — verified in `85537c7`; exactly 3 of 10 allowed. (Originally failed as #2.)
 
 ### TC-33: Cleanup deletes every expired job created at the same time
 - **Acceptance criterion:** AC-20
@@ -478,7 +479,7 @@
   4. Read each `fullKey` back from storage.
 - **Expected result:** All 20 jobs are swept and every object is gone.
 - **Automated by:** `tests/routes/cleanup-concurrency.test.ts` › `AC-20/FR-31: cleanup deletes the objects of every expired job created at the same time`
-- **Status:** **Fail (#1)** — 19 of 20 jobs never reach `jobs:index`; their objects survive.
+- **Status:** Pass — verified in `85537c7`; all 20 concurrently-created jobs are swept and every object is gone. (Originally failed as #1.)
 
 ### TC-34: The full upload → preview → pay → unlock → download flow works on both mobile viewports
 - **Acceptance criterion:** AC-26
@@ -531,7 +532,7 @@
   1. POST the file to `/api/generate`.
 - **Expected result:** 4xx with a typed `error`; provider call count 0.
 - **Automated by:** `tests/routes/generate.test.ts` › `FR-9: a corrupt JPEG with valid magic bytes is a typed 4xx, not a 500`
-- **Status:** **Fail (#4)** — 500 `{"error":"fatal"}`.
+- **Status:** Pass — verified in `85537c7`; 400 `invalid_image`, provider not called, quota untouched. (Originally failed as #4.)
 
 ### TC-38: `POST /api/generate` returns 202 while generating and the client polls the job
 - **Acceptance criterion:** FR-12
@@ -544,7 +545,7 @@
   2. Confirm the client polls `/api/jobs/[id]` until `preview_ready`/`failed`.
 - **Expected result:** 202 immediately after job creation; preview arrives via polling.
 - **Automated by:** n/a (code review; no AC test because AC-26 passes with the inline flow)
-- **Status:** **Fail (#5)** — generation runs inline and the client never polls.
+- **Status:** **Fail (#5)** — generation still runs inline and the client never polls. Explicitly deferred in `05a0c24`: the route is bounded with `maxDuration = 120` and the deviation is documented in the README. Remains open for the Analyst's decision.
 
 ### TC-39: Production responses carry baseline security headers
 - **Acceptance criterion:** security review (no AC)
@@ -556,14 +557,27 @@
   1. Dump the response headers.
   2. Check for CSP, X-Frame-Options/`frame-ancestors`, X-Content-Type-Options and Referrer-Policy.
 - **Expected result:** Baseline headers present.
-- **Automated by:** n/a (manual header probe; no test in the repo)
-- **Status:** **Fail (#6)** — none of the headers are sent.
+- **Automated by:** `e2e/security.spec.ts` › `security headers are set on the landing page`
+- **Status:** Pass — verified in `85537c7`; the e2e test confirms CSP, nosniff, X-Frame-Options, Referrer-Policy and Permissions-Policy on both viewports. (Originally failed as #6; the CSP later caused #7.)
+
+### TC-40: An accepted HEIC upload converts in the browser (or shows the fallback message)
+- **Acceptance criterion:** FR-7 (and FR-6 / Assumption 5)
+- **Priority:** high
+- **Type:** functional
+- **Preconditions:** Production build served by Playwright with the CSP from `next.config.ts`.
+- **Test data:** `tests/fixtures/heic/example.heic` (real HEIC, MIT, 718 KB)
+- **Steps:**
+  1. Open `/create`, select the HEIC fixture, tick consent and generate.
+  2. Wait up to 60 s for the paywall preview or the "HEIC can't be read here — export as JPG" fallback.
+- **Expected result:** The HEIC is converted and the preview appears, or the decoder fails gracefully with the fallback message. The page must not stay on "Getting your photo ready…" forever.
+- **Automated by:** `e2e/heic.spec.ts` › `TC-40 (FR-7): a HEIC upload is converted in the browser`
+- **Status:** **Fail (#7)** — the production CSP blocks `heic2any`'s WASM worker (`new Function` is not allowed by `'wasm-unsafe-eval'`); the upload hangs with no fallback. The same fixture converts in `next dev`.
 
 ## Not covered
 
 - **Real Stripe and Gemini behaviour** — no keys exist in this increment; both adapters are explicitly unverified by the spec (Assumptions 2, FR-16, FR-23). Not testable here.
-- **HEIC conversion on a real iPhone/Safari** — best effort by design (Assumption 5); the automated suite has no real HEIC fixture or WebKit engine.
-- **Vercel Blob / Upstash drivers** — no accounts/tokens in this increment; only the local drivers are exercised. The concurrency findings also apply to the Upstash driver because it uses the same read-modify-write calls, but that is inference rather than an executed test.
+- **HEIC on a real iPhone/Safari engine** — the Chromium + `heic2any` path is covered by TC-40 with a real HEIC fixture; WebKit/Safari is still not exercised. iOS camera capture normally yields JPEG (Assumption 5).
+- **Vercel Blob / Upstash drivers** — no accounts/tokens in this increment; only the local drivers are exercised. The atomic operations now have an Upstash Lua implementation, but it has not been run against a real Redis instance.
 - **10 MB uploads through Vercel's 4.5 MB serverless request-body limit** — a deployment constraint, not observable with the local server; the client normally resizes to well below it.
 - **Visual quality of the mock portrait and the placeholder landing assets** — owner task (Assumptions 6, 7).
 - **Lighthouse on the Android project** — one mobile run is enough for a per-page budget; the iPhone project was run.

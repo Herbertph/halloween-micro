@@ -75,7 +75,6 @@ export async function handlePaymentWebhook(
       next.product = product;
       next.paidAmountCents = amountCents;
       await saveJob(next);
-      await recordSale({ product, amountCents });
     } else if (!job.product) {
       await saveJob({
         ...applyProductToAssets(job, product),
@@ -83,6 +82,14 @@ export async function handlePaymentWebhook(
         paidAmountCents: job.paidAmountCents ?? amountCents,
       });
     }
+
+    // Idempotent by session id: a webhook retry after a partial failure can
+    // complete a missing record, but an existing marker blocks a second sale.
+    await recordSale({
+      sessionId: parsed.sessionId,
+      product,
+      amountCents,
+    });
 
     await setSessionStatus(parsed.sessionId, "paid");
     await kv.set(marker, "done", { exSeconds: IDEMPOTENCY_TTL_SECONDS });

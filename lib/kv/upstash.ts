@@ -1,9 +1,12 @@
-import type {
-  KV,
-  RollingWindowInput,
-  RollingWindowResult,
-  SetOptions,
+import {
+  KVError,
+  type KV,
+  type RollingWindowInput,
+  type RollingWindowResult,
+  type SetOptions,
 } from "./types";
+
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 const ROLLING_WINDOW_SCRIPT = `
 local key = KEYS[1]
@@ -37,24 +40,55 @@ export class UpstashKV implements KV {
   constructor(
     private readonly url: string,
     private readonly token: string,
+    private readonly timeoutMs = DEFAULT_TIMEOUT_MS,
   ) {}
 
   private async command<T = unknown>(...args: string[]): Promise<T> {
-    const response = await fetch(this.url, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${this.token}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(args),
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      throw new Error(`Upstash command failed: ${response.status}`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await fetch(this.url, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${this.token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(args),
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new KVError(
+          "http",
+          `Upstash command failed: ${response.status}`,
+          response.status,
+        );
+      }
+      let payload: { result?: T; error?: string };
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        throw new KVError("http", "Upstash returned invalid JSON", response.status);
+      }
+      if (payload.error) {
+        throw new KVError("http", payload.error, response.status);
+      }
+      return payload.result as T;
+    } catch (error) {
+      if (error instanceof KVError) throw error;
+      if ((error as Error)?.name === "AbortError") {
+        throw new KVError(
+          "timeout",
+          `Upstash request timed out after ${this.timeoutMs} ms`,
+        );
+      }
+      throw new KVError(
+        "network",
+        `Upstash request failed: ${(error as Error)?.message ?? "network error"}`,
+      );
+    } finally {
+      clearTimeout(timer);
     }
-    const payload = (await response.json()) as { result?: T; error?: string };
-    if (payload.error) throw new Error(payload.error);
-    return payload.result as T;
   }
 
   async get(key: string): Promise<string | null> {

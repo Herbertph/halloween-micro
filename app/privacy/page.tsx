@@ -9,6 +9,8 @@ export const metadata: Metadata = {
   alternates: { canonical: "/privacy" },
 };
 
+export const dynamic = "force-dynamic";
+
 export default function PrivacyPage() {
   const email = contactEmail();
   return (

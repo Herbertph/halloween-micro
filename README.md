@@ -42,6 +42,7 @@ the whole flow.
 | `npm test` | Vitest unit, route-handler and component tests |
 | `npm run e2e` | Playwright end to end. Requires `npm run build` first; serves on port **3101** (never 4545) |
 | `npm run check:secrets` | Scans `.next/static` for server secrets and prompt text (run after a build) |
+| `npm run verify:providers` | Manual, needs keys: probes Gemini, Stripe, Blob, Upstash and Turnstile with a pass/fail table; `npm run verify:providers:dry` validates shape only |
 | `npm run assets` | Regenerates the placeholder landing/OG images in `public/` |
 | `npm run fixtures` | Regenerates the test fixtures in `tests/fixtures/` |
 
@@ -71,10 +72,11 @@ Every variable the code reads is listed and commented in
 
 | Group | Variables |
 | --- | --- |
+| Production safety | `ALLOW_MOCK_PROVIDERS` |
 | Site | `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_PLAUSIBLE_DOMAIN`, `CONTACT_EMAIL` |
 | Pricing | `PRICE_SINGLE_CENTS`, `PRICE_PACK_CENTS`, `GENERATION_COST_CENTS` |
 | Image provider | `IMAGE_PROVIDER`, `GEMINI_API_KEY`, `GEMINI_IMAGE_MODEL`, `GEMINI_API_BASE`, `GENERATION_TIMEOUT_MS` |
-| Payments | `PAYMENT_PROVIDER`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_API_BASE` |
+| Payments | `PAYMENT_PROVIDER`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_API_BASE`, `STRIPE_PRICE_SINGLE_ID`, `STRIPE_PRICE_PACK_ID` |
 | Turnstile | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `TURNSTILE_ENFORCED` |
 | Admin | `ADMIN_PASSWORD` |
 | Secrets | `DOWNLOAD_SIGNING_SECRET`, `MOCK_WEBHOOK_SECRET`, `CRON_SECRET` |
@@ -91,6 +93,9 @@ fall back to obviously-insecure values so a fresh clone works.
   checkout pages; client components only for upload, polling and checkout actions.
 - **`config/styles.ts`** is the single style config (five styles, display copy and prompt
   templates). It is server-only; prompts never reach the browser or an API response.
+- **`lib/config-check.ts` / `lib/demo.ts`** refuse production deployments that still use
+  mock providers or local disk drivers, unless `ALLOW_MOCK_PROVIDERS=true` opts into a
+  labelled demo. `GET /api/health` reports readiness without echoing values.
 - **`lib/providers/image`** is the only image-generation boundary. `mock` uses `sharp`
   (deterministic per style, `no_subject` on featureless images); `gemini` is implemented
   against the Gemini image API but unverified (no key in this increment).
@@ -229,6 +234,33 @@ Replicate is documented as a future fallback and is not implemented.
 The Stripe adapter is implemented but **cannot be verified in this increment** (no key):
 confirm test-mode checkout and webhook signatures before taking real payments.
 
+## Production safety, health and demo mode
+
+Production is detected from `NODE_ENV=production` (set by `next build`/`next start`), not
+from a variable. In that mode the server refuses to run with `PAYMENT_PROVIDER=mock`,
+`IMAGE_PROVIDER=mock`, `STORAGE_DRIVER=local` or `KV_DRIVER=local`: `/api/generate` and
+`/api/checkout` answer **503 `misconfigured`** before any provider call or storage write,
+and the reason is logged once at start-up. Missing provider/driver variables are reported
+by name only.
+
+- `GET /api/health` returns `200 { ready: true, mode: "live" | "demo" }` or
+  `503 { ready: false, problems: [...] }`. It never returns a configuration value.
+- A deliberate demo deploy sets `ALLOW_MOCK_PROVIDERS=true` **and keeps
+  `PAYMENT_PROVIDER=mock`**. It keeps the mock flow working and renders “Demo — no real
+  payment” in the header, on the paywall and on the success page. With a real payment
+  provider the flag cannot relax any check or show the label: the normal live rules apply.
+  Never use a demo deploy to take money.
+- `npm run verify:providers` probes only configured services (Gemini, Stripe, Blob, Upstash,
+  Turnstile), prints `PASS` / `FAIL` / `SKIP` and exits non-zero if a configured service
+  fails. The Gemini probe requires an actual inline image part, not just HTTP 200.
+  `npm run verify:providers:dry` (or `node scripts/verify-providers.mjs --dry-run`)
+  validates environment shape without any network call. Output is centrally redacted; secrets
+  and tokens never appear, even in verbose/crash paths.
+- `npm test` includes Blob and Upstash integration tests against an ephemeral local HTTP
+  stub (success, 4xx, timeout and the pack-claim conditional delete), so the production
+  drivers are exercised offline. Both drivers bound every request with a timeout and raise
+  typed errors instead of hanging a function.
+
 ## Deploying to Vercel
 
 1. Import the repository and set the env vars from `.env.example` in Project Settings.
@@ -236,7 +268,9 @@ confirm test-mode checkout and webhook signatures before taking real payments.
    `PRICE_PACK_CENTS`, `GENERATION_COST_CENTS`, `IMAGE_PROVIDER`, `PAYMENT_PROVIDER`,
    `ADMIN_PASSWORD`, the three secrets, `STORAGE_DRIVER=vercel-blob`,
    `KV_DRIVER=upstash`, `BLOB_READ_WRITE_TOKEN`, `KV_REST_URL`, `KV_REST_TOKEN`.
-   Set the Turnstile variables only when you enable the check.
+   Keep `ALLOW_MOCK_PROVIDERS=false` for a real deployment; the health endpoint must report
+   `ready: true, mode: "live"` before announcing. Set the Turnstile variables only when you
+   enable the check, and the Stripe price ids when you run the verifier.
 2. Attach a Vercel Blob store and an Upstash Redis database; copy their tokens.
 3. `vercel.json` registers two crons: hourly `/api/cron/cleanup` and every-five-minutes
    `/api/cron/expand-packs` (paid packs left by a closed tab). Vercel sends
@@ -283,6 +317,9 @@ mobile LCP fast.
   owner before launch. They are not customer results.
 - Turnstile is off by default. The verifier is implemented and tested with mocks, but the
   Cloudflare widget itself is only exercised when real/test keys are configured.
+- A production deployment with any mock provider or local driver is refused unless
+  `ALLOW_MOCK_PROVIDERS=true`; a demo deployment shows the red “Demo — no real payment”
+  label and must not be used to sell.
 - The admin view is an aggregate convenience, not accounting: it counts generation
   *attempts* at `GENERATION_COST_CENTS` each and has no per-order data.
 - Lighthouse runs only when explicitly requested (`RUN_LIGHTHOUSE=1`), as the median of
@@ -315,6 +352,10 @@ overwrite or append a trusted client IP; otherwise the per-IP preview limit can 
 - [ ] `PRICE_SINGLE_CENTS`, `PRICE_PACK_CENTS` and `GENERATION_COST_CENTS` confirmed.
 - [ ] `ADMIN_PASSWORD` set to a strong value (admin fails closed without it).
 - [ ] Turnstile keys + `TURNSTILE_ENFORCED=true` when traffic warrants it; remove test keys.
+- [ ] `npm run verify:providers` passes every configured service (use `-- --dry-run`
+      first when shaping the env).
+- [ ] `GET /api/health` returns `ready: true, mode: "live"` on the deployment.
+- [ ] `ALLOW_MOCK_PROVIDERS` is unset/false on the real deployment.
 - [ ] Landing examples and OG image replaced with licensed assets.
 - [ ] Privacy/terms reviewed for the live jurisdictions.
 - [ ] `CRON_SECRET`, `DOWNLOAD_SIGNING_SECRET`, `MOCK_WEBHOOK_SECRET` rotated to real values.

@@ -72,4 +72,16 @@ describe("configuration coverage", () => {
       expect(example).toMatch(new RegExp(`^${name}=`, "m"));
     }
   });
+
+  it("G3-AC-15: every env name is documented and the hardening vars are present", async () => {
+    expect(await missingEnvNames()).toEqual([]);
+    const example = await readFile(path.join(process.cwd(), ".env.example"), "utf8");
+    for (const name of [
+      "ALLOW_MOCK_PROVIDERS",
+      "STRIPE_PRICE_SINGLE_ID",
+      "STRIPE_PRICE_PACK_ID",
+    ]) {
+      expect(example).toMatch(new RegExp(`^${name}=`, "m"));
+    }
+  });
 });

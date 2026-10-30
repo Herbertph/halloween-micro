@@ -1,4 +1,5 @@
 import { ApiError, apiErrorResponse, readJson } from "@/lib/api";
+import { assertProductionConfig } from "@/lib/config-check";
 import { loadJob, saveJob, applyProductToAssets } from "@/lib/job-service";
 import { transition } from "@/lib/jobs";
 import { getPaymentsProvider } from "@/lib/providers/payments";
@@ -9,6 +10,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request): Promise<Response> {
+  const config = assertProductionConfig();
+  if (!config.ready) {
+    return Response.json(
+      { error: "misconfigured", problems: config.problems },
+      { status: 503 },
+    );
+  }
+
   try {
     const body = await readJson<{ jobId?: unknown; product?: unknown }>(request);
     if (typeof body.jobId !== "string") {

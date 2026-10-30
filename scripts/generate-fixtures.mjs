@@ -65,4 +65,33 @@ const gpsJpeg = Buffer.from(
 );
 await writeFile(path.join(root, "gps.jpg"), gpsJpeg);
 
+// Portrait image stored landscape with EXIF orientation 6 (rotate 90° CW):
+// viewers show a 600 × 900 portrait; naive dimension reads see 900 × 600.
+const portraitScene = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900">
+  <rect width="600" height="450" fill="#c62828"/>
+  <rect y="450" width="600" height="450" fill="#1565c0"/>
+  <circle cx="300" cy="300" r="120" fill="#f4e0b8"/>
+</svg>`;
+const storedLandscape = await sharp(Buffer.from(portraitScene))
+  .rotate(-90)
+  .jpeg({ quality: 90 })
+  .toBuffer();
+const orientationExif = piexif.dump({
+  "0th": { [piexif.ImageIFD.Orientation]: 6 },
+  Exif: {},
+  GPS: {},
+  "1st": {},
+  thumbnail: null,
+});
+const rotatedJpeg = Buffer.from(
+  piexif
+    .insert(
+      orientationExif,
+      `data:image/jpeg;base64,${storedLandscape.toString("base64")}`,
+    )
+    .split(",")[1],
+  "base64",
+);
+await writeFile(path.join(root, "rotated.jpg"), rotatedJpeg);
+
 console.log("fixtures written");

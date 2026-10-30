@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import { adminPassword, downloadSecret } from "@/lib/env";
+import { adminPassword, downloadSecret, siteUrl } from "@/lib/env";
 import { getKv } from "@/lib/kv";
 
 export const ADMIN_COOKIE = "hp_admin";
@@ -52,6 +52,10 @@ export function verifyAdminCookieValue(
   );
 }
 
+function secureAttribute(): string | null {
+  return siteUrl().startsWith("https://") ? "Secure" : null;
+}
+
 export function adminCookieHeader(value: string): string {
   return [
     `${ADMIN_COOKIE}=${value}`,
@@ -59,11 +63,23 @@ export function adminCookieHeader(value: string): string {
     "HttpOnly",
     "SameSite=Lax",
     `Max-Age=${ADMIN_SESSION_TTL_SECONDS}`,
-  ].join("; ");
+    secureAttribute(),
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join("; ");
 }
 
 export function clearAdminCookieHeader(): string {
-  return `${ADMIN_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  return [
+    `${ADMIN_COOKIE}=`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    "Max-Age=0",
+    secureAttribute(),
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join("; ");
 }
 
 export function cookieValue(

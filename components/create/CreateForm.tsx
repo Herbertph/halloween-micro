@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useRef, useState } from "react";
 
+import { DemoBadge } from "@/components/DemoBadge";
 import { track } from "@/lib/analytics";
 import {
   prepareImage,
@@ -31,6 +32,7 @@ interface CreateFormProps {
   priceLabel: string;
   packPriceLabel?: string;
   turnstileSiteKey?: string;
+  demo?: boolean;
   initialJob?: RestoredJob;
   declined?: boolean;
   cancelled?: boolean;
@@ -69,6 +71,7 @@ export function CreateForm({
   priceLabel,
   packPriceLabel = "$8.99",
   turnstileSiteKey,
+  demo = false,
   initialJob,
   declined = false,
   cancelled = false,
@@ -233,6 +236,7 @@ export function CreateForm({
 
         {phase === "preview" && previewUrl ? (
           <section aria-label="Your preview" className="mt-6" data-testid="paywall">
+            {demo ? <DemoBadge className="mb-3" /> : null}
             <div className="overflow-hidden rounded-2xl border border-white/10">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img

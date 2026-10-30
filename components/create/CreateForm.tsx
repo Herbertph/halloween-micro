@@ -1,7 +1,6 @@
 "use client";
 
-import Image from "next/image";
-import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRef, useState } from "react";
 
 import { track } from "@/lib/analytics";
@@ -13,7 +12,10 @@ import {
   type UploadErrorCode,
 } from "@/lib/client/image";
 import { formatDateTimeUtc } from "@/lib/format";
+import type { Product } from "@/lib/products";
 import type { PublicStyle, StyleId } from "@/lib/types";
+
+const TurnstileField = dynamic(() => import("./TurnstileField"), { ssr: false });
 
 type Phase = "idle" | "preparing" | "generating" | "preview" | "failed";
 
@@ -27,6 +29,8 @@ interface RestoredJob {
 interface CreateFormProps {
   styles: PublicStyle[];
   priceLabel: string;
+  packPriceLabel?: string;
+  turnstileSiteKey?: string;
   initialJob?: RestoredJob;
   declined?: boolean;
   cancelled?: boolean;
@@ -48,6 +52,9 @@ const API_MESSAGES: Record<string, string> = {
   consent_required: "Please confirm you own the photo or have permission to use it.",
   invalid_style: "Pick one of the five styles.",
   capacity: "We're at capacity today. Please come back tomorrow.",
+  captcha_failed: "Please complete the quick check and try again.",
+  captcha_timeout: "The quick check timed out. Try again in a moment.",
+  invalid_product: "That product is not available.",
 };
 
 function rateLimitedMessage(retryAt: unknown): string {
@@ -60,6 +67,8 @@ function rateLimitedMessage(retryAt: unknown): string {
 export function CreateForm({
   styles,
   priceLabel,
+  packPriceLabel = "$8.99",
+  turnstileSiteKey,
   initialJob,
   declined = false,
   cancelled = false,
@@ -128,6 +137,14 @@ export function CreateForm({
     body.set("image", prepared);
     body.set("styleId", styleId);
     body.set("consent", "true");
+    if (turnstileSiteKey) {
+      const token = (
+        document.querySelector(
+          'input[name="cf-turnstile-response"]',
+        ) as HTMLInputElement | null
+      )?.value;
+      body.set("turnstileToken", token ?? "");
+    }
 
     try {
       const response = await fetch("/api/generate", { method: "POST", body });
@@ -170,16 +187,16 @@ export function CreateForm({
     }
   }
 
-  async function checkout() {
+  async function checkout(product: Product) {
     if (!jobId) return;
     setCheckoutPending(true);
     setError(null);
-    track("checkout_clicked", { style: styleId });
+    track("checkout_clicked", { style: styleId, product });
     try {
       const response = await fetch("/api/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jobId }),
+        body: JSON.stringify({ jobId, product }),
       });
       const data = (await response.json()) as { url?: string; error?: string };
       if (response.ok && data.url) {
@@ -217,12 +234,12 @@ export function CreateForm({
         {phase === "preview" && previewUrl ? (
           <section aria-label="Your preview" className="mt-6" data-testid="paywall">
             <div className="overflow-hidden rounded-2xl border border-white/10">
-              <Image
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
                 src={previewUrl}
                 alt="Watermarked preview of your haunted portrait"
                 width={512}
                 height={512}
-                unoptimized
                 className="w-full object-cover"
               />
             </div>
@@ -233,7 +250,7 @@ export function CreateForm({
               <button
                 type="button"
                 className="btn-primary w-full"
-                onClick={checkout}
+                onClick={() => void checkout("single")}
                 disabled={checkoutPending}
               >
                 {checkoutPending ? "Opening checkout…" : `Unlock HD — ${priceLabel}`}
@@ -241,6 +258,17 @@ export function CreateForm({
               <button
                 type="button"
                 className="btn-secondary w-full"
+                onClick={() => void checkout("pack")}
+                disabled={checkoutPending}
+              >
+                Get the Monster Pack — {packPriceLabel}
+              </button>
+              <p className="text-center text-xs text-bone/55">
+                Monster Pack: 4 styles, one download each.
+              </p>
+              <button
+                type="button"
+                className="text-sm text-bone/60 underline underline-offset-4 hover:text-pumpkin"
                 onClick={() => {
                   setPhase("idle");
                   setPreviewUrl(undefined);
@@ -345,6 +373,8 @@ export function CreateForm({
               </label>
             </div>
 
+            {turnstileSiteKey ? <TurnstileField siteKey={turnstileSiteKey} /> : null}
+
             <div className="flex flex-col gap-3">
               <button type="submit" className="btn-primary w-full" disabled={!canGenerate}>
                 {busy ? "Haunting your photo…" : "Generate free preview"}
@@ -388,6 +418,9 @@ export function CreateForm({
           <ul className="mt-3 space-y-2 text-sm text-bone/75">
             <li>Free watermarked preview of your portrait.</li>
             <li>Full-resolution JPEG for {priceLabel} when you unlock it.</li>
+            <li>
+              Monster Pack for {packPriceLabel}: four styles, one download each.
+            </li>
             <li>Photos deleted automatically after 48 hours.</li>
             <li>7-day refund policy if you are not happy.</li>
           </ul>
@@ -397,9 +430,9 @@ export function CreateForm({
           <p className="mt-3">
             Your photo is processed by an AI image provider only to create your portrait.
             It is stored privately, never shown in a gallery and never reused.{" "}
-            <Link href="/privacy" className="link">
+            <a href="/privacy" className="link">
               Read the privacy policy
-            </Link>
+            </a>
             .
           </p>
         </div>

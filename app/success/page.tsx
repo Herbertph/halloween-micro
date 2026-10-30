@@ -1,5 +1,6 @@
 import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
 import { SuccessPoller } from "@/components/success/SuccessPoller";
+import { publicStyles } from "@/config/styles";
 import { loadJob } from "@/lib/job-service";
 import { getSession } from "@/lib/sessions";
 
@@ -30,6 +31,7 @@ export default async function SuccessPage({
         <SuccessPoller
           sessionId={session?.id}
           jobId={job && job.status !== "expired" ? job.id : undefined}
+          styles={publicStyles()}
         />
       </main>
       <SiteFooter />

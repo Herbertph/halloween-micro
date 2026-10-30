@@ -11,10 +11,12 @@ const contentSecurityPolicy = [
   "img-src 'self' data: blob:",
   "font-src 'self'",
   "style-src 'self' 'unsafe-inline'",
+  "frame-src https://challenges.cloudflare.com",
   // 'unsafe-eval' is required by heic2any's Emscripten worker (`new Function`);
   // 'wasm-unsafe-eval' alone only permits WebAssembly compilation. Script
-  // origins stay locked to self + Plausible and the app renders no user HTML.
-  `script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://plausible.io`,
+  // origins stay locked to self + Plausible + Turnstile and the app renders no
+  // user HTML.
+  `script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://plausible.io https://challenges.cloudflare.com`,
   "worker-src 'self' blob:",
   `connect-src 'self' https://plausible.io${isDev ? " ws: http: https:" : ""}`,
 ].join("; ");
@@ -23,6 +25,11 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["sharp"],
   poweredByHeader: false,
   outputFileTracingRoot: process.cwd(),
+  experimental: {
+    // The landing is text/images only; inlining CSS removes a render-blocking
+    // round trip under mobile throttling.
+    inlineCss: true,
+  },
   async headers() {
     return [
       {

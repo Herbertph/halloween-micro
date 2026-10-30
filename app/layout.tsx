@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
-import Script from "next/script";
+
+import { plausibleDomain, siteUrl } from "@/lib/env";
 
 import "@fontsource-variable/inter";
 import "@fontsource/im-fell-english/400.css";
 import "./globals.css";
-
-import { plausibleDomain, siteUrl } from "@/lib/env";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl()),
@@ -45,11 +44,10 @@ export default function RootLayout({
       <body className="font-body">
         {children}
         {domain ? (
-          <Script
+          <script
             defer
             data-domain={domain}
             src="https://plausible.io/js/script.js"
-            strategy="afterInteractive"
           />
         ) : null}
       </body>

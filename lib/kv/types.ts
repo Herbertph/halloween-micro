@@ -21,6 +21,21 @@ export interface RollingWindowResult {
   oldest: number;
 }
 
+export type KVErrorCode = "http" | "timeout" | "network";
+
+/** Typed KV failure so callers can surface retryable errors. */
+export class KVError extends Error {
+  constructor(
+    public readonly code: KVErrorCode,
+    message: string,
+    public readonly status?: number,
+    public readonly retryable = true,
+  ) {
+    super(message);
+    this.name = "KVError";
+  }
+}
+
 export interface KV {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, options?: SetOptions): Promise<void>;

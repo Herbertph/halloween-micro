@@ -1,7 +1,10 @@
 # Spec: Haunted Portrait — MVP (increment 1)
 
 - **Branch:** `feature/haunted-portrait-mvp`
-- **Status:** ready for development
+- **Status:** implemented in this branch; QA verdict PASS (see `docs/test-reports/haunted-portrait-mvp.md`).
+  Amended after QA: FR-7 (blocked decoder fallback), FR-12 (inline generation), FR-27 (expired
+  token response), AC-16/17 (concurrent requests), AC-25 (measurable focus), AC-27 (seeded secrets),
+  assumption 8 (static banner).
 - **Source:** "Haunted Portrait — MVP Requirements" (owner document, pasted 2026-10-30)
 - **Deadline:** live and taking payments the night of Oct 30, selling through Oct 31
 
@@ -84,8 +87,11 @@ and with per-visitor rate limits that protect the image-generation budget.
   it". The generate button is disabled until a file, a style and consent are present.
 - **FR-7** — In the browser: HEIC/HEIF is converted to JPEG, the long edge is scaled to at
   most 1536 px, the image is re-encoded as JPEG (quality ~0.9) and client metadata is
-  dropped. If the browser cannot decode the file, the user gets a clear message ("iPhone
-  photos in HEIC can't be read here — export as JPG") and can pick another file.
+  dropped. Native decoding is tried first (Safari can decode HEIC itself); the WASM decoder
+  is only used when native decoding fails. If the browser cannot decode the file — including
+  when a browser policy blocks the WASM decoder — the user gets the clear message "iPhone
+  photos in HEIC can't be read here — export as JPG" within 20 s and can pick another file;
+  the conversion must never hang the upload step.
 - **FR-8** — Client-side validation rejects unsupported types and files over 10 MB with a
   specific message, before any request is sent.
 - **FR-9** — The server re-validates: magic-byte sniffing (not just the MIME header), size
@@ -105,9 +111,16 @@ and with per-visitor rate limits that protect the image-generation budget.
 ### Generation
 
 - **FR-12** — `POST /api/generate` accepts the image plus `styleId` and consent flag,
-  creates a job (`id`, `createdAt`, `expiresAt`, `status`, `styleId`, rate-limit context)
-  and returns the job id and the preview URL. HTTP 202 while generating, and the client
-  polls for status.
+  creates a job (`id`, `createdAt`, `expiresAt`, `status`, `styleId`, rate-limit context),
+  runs the generation for that job, and answers 202 with the final job status plus the
+  preview URL. The request is bounded by `maxDuration = 120` (one 60 s attempt plus one
+  retry); the client shows a progress state for the duration of the request and never
+  leaves the user on a blank screen. **Deployment requirement:** the hosting plan must
+  allow a single request of at least 130 s, or increment 2 must move generation to an
+  asynchronous job with polling before launch. Job status is always also readable through
+  `GET /api/jobs/:id`.
+  *Amended after QA found the deviation (#5): the original contract asked for a 202-then-poll
+  flow; the shipped MVP generates inline and every acceptance criterion still passes.*
 - **FR-13** — Before storage and before calling the provider, the server decodes the image,
   applies EXIF orientation, and re-encodes it so that **all** metadata (including GPS) is
   removed.
@@ -157,8 +170,10 @@ and with per-visitor rate limits that protect the image-generation budget.
   redirect alone; only a paid job state unlocks anything.
 - **FR-27** — `GET /api/download?token=...` streams the full-resolution file. The token is
   an HMAC over job id, object key and expiry, valid 15 minutes, and only issued after the
-  job is paid. A tampered token returns 403; an expired or deleted one returns 410 with a
-  clear message.
+  job is paid. A tampered token returns 403; a deleted portrait returns 410 with the
+  human-readable message "This portrait has already been deleted."; an expired token
+  returns 410 with the machine code `token_expired` (the success page keeps the expiry
+  notice visible, so this is only reachable from a tab left open past the token TTL).
 - **FR-28** — The unlocked page shows: HD download button, the sentence "Your images are
   deleted after 48 hours. Download them now." and the exact expiry time.
 
@@ -229,11 +244,11 @@ automated test named `AC-<n>: ...`.
   once, generation ran once, and the second delivery returns 200.
 - **AC-15** — Given a webhook with an invalid signature, then the endpoint returns 400 and
   the job stays unpaid.
-- **AC-16** — Given one IP, when it generates 3 previews in 24 h, then all three succeed;
-  the 4th is rejected with a message that includes when it may retry; a generation 24 h
-  later (faked clock) succeeds again.
+- **AC-16** — Given one IP, when it generates 3 previews in 24 h (sequentially **or in
+  parallel**), then all three succeed; the 4th is rejected with a message that includes when
+  it may retry; a generation 24 h later (faked clock) succeeds again.
 - **AC-17** — Given the daily cap is reached, then the next generation is refused with the
-  capacity message and no provider call is made.
+  capacity message and no provider call is made — also when the requests arrive in parallel.
 - **AC-18** — Given the provider fails transiently once, then a single retry happens and the
   job succeeds; given it fails twice, then the job fails, the UI shows the retryable error
   and no checkout is offered.
@@ -251,12 +266,14 @@ automated test named `AC-<n>: ...`.
   provider disclosure, the contact email and the 7-day refund sentence.
 - **AC-24** — Lighthouse mobile on `/`: performance ≥ 85 and accessibility ≥ 90.
 - **AC-25** — Automated accessibility check on `/` and `/create`: labels on the file input
-  and consent checkbox, alt text on images, visible focus, no critical axe violations.
+  and consent checkbox, alt text on images, no critical axe violations, and visible focus —
+  defined as: when the upload control receives keyboard focus, its own or its visible
+  wrapper's computed outline, box-shadow or border differs from the unfocused state.
 - **AC-26** — The full flow passes in Playwright at an iPhone (Safari-like) viewport and an
   Android Chrome viewport: upload → preview → pay → unlock → download.
-- **AC-27** — No server secret is in the client bundle: after `next build`, the prompt text,
-  `DOWNLOAD_SIGNING_SECRET`, `MOCK_WEBHOOK_SECRET` and any provider key do not appear in
-  `.next/static/**`.
+- **AC-27** — No server secret is in the client bundle: after `next build` with fake values
+  seeded for every server secret, the prompt text, `DOWNLOAD_SIGNING_SECRET`,
+  `MOCK_WEBHOOK_SECRET` and any provider key do not appear in `.next/static/**`.
 - **AC-28** — Every `process.env` name read by the code appears in `.env.example`.
 
 ## Assumptions (please confirm in review)
@@ -276,7 +293,8 @@ automated test named `AC-<n>: ...`.
    launch. We will not claim they are real customer results.
 7. **Mock provider output is a stylised derivative, not an AI portrait.** It exists to make
    the flow demoable and testable; visual quality arrives with the real provider.
-8. **Countdown uses the server date in UTC**, no clock sync, no ticking timer.
+8. **The urgency banner is static and server-rendered from the UTC date**, no clock sync and
+   no ticking timer.
 9. **Storage and KV**: Vercel Blob + Upstash Redis in production, disk-backed drivers in dev
    and tests (`STORAGE_DRIVER`, `KV_DRIVER`). No accounts are needed to develop or test.
 10. **Retention of 48 h is enforced by our own code**, not by a storage lifecycle rule, so
@@ -348,12 +366,16 @@ Rules that keep the flow safe:
 ### Commands
 
 ```
-Install:  npm install
-Dev:      npm run dev            # http://localhost:3000
-Build:    npm run build && npm start
-Unit:     npm test
-E2E:      npm run e2e           # Playwright, own port per worker (never 4545)
-Lint:     npm run lint
+Install:   npm install
+Dev:       npm run dev            # http://localhost:3000
+Build:     npm run build && npm start
+Unit:      npm test
+E2E:       npm run e2e            # Playwright, own port per worker (never 4545)
+Lighthouse: $env:RUN_LIGHTHOUSE=1; npm run e2e -- --project=iphone   # opt-in (AC-24)
+Lint:      npm run lint
+Secrets:   npm run check:secrets  # scans .next/static for secrets and prompt text (AC-27)
+Assets:    npm run assets         # regenerate public/ placeholder art
+Fixtures:  npm run fixtures       # regenerate tests/fixtures (EXIF, blank, HEIC)
 ```
 
 ### Testing strategy

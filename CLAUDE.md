@@ -26,6 +26,7 @@ Built with a multi-agent pipeline: requirements analyst → developer → tester
 | `npm test` | Vitest unit, route and component tests. |
 | `npm run e2e` | Playwright e2e (build first; serves on port 3101, never 4545). |
 | `npm run check:secrets` | Scan `.next/static` for secrets/prompt text (after build). |
+| `npm run verify:providers` | Manual gate: probes configured providers, prints a redacted PASS/FAIL/SKIP table; `npm run verify:providers:dry` validates shape only. |
 | `npm run assets` | Regenerate placeholder landing/OG images. |
 | `npm run fixtures` | Regenerate test fixtures. |
 
@@ -42,10 +43,13 @@ app/                    routes: /, /create, /success, /privacy, /terms, /admin,
                         /api/download, /api/share, /api/cron/cleanup,
                         /api/cron/expand-packs, /api/admin/login|logout
 components/             landing chrome, upload/paywall form, success asset cards,
-                        admin login
+                        admin login, demo badge
+app/api/health/         public readiness (mode + variable names only)
 config/styles.ts        style ids, names, descriptions, prompts (server only)
 lib/products.ts         product ids, env prices, pure pack composition
 lib/assets.ts           asset normalisation (increment 1 jobs included)
+lib/config-check.ts     production guard + health snapshot (names only)
+lib/demo.ts             deliberate demo-mode flag
 lib/expand.ts           atomic claim + one-asset expansion, cron sweeper
 lib/providers/          image (mock, gemini) and payments (mock, stripe) adapters
 lib/storage/            storage interface + local disk and Vercel Blob drivers
@@ -62,9 +66,9 @@ lib/limits.ts           per-IP rolling window and global daily cap
 lib/tokens.ts           HMAC download (per asset) and share tokens
 lib/analytics.ts        Plausible events (no-op when unset)
 lib/client/image.ts     browser validation, HEIC conversion, 1536 px resize
-tests/                  unit, route, component tests and fixtures
+tests/                  unit, route, component and stub-server integration tests
 e2e/                    Playwright journeys, axe checks, Lighthouse budget
-scripts/                asset/fixture generators and the bundle secret scan
+scripts/                asset/fixture generators, secret scan, provider verifier
 ```
 
 - `docs/specs/`: feature specs written by the requirements analyst
@@ -84,7 +88,9 @@ scripts/                asset/fixture generators and the bundle secret scan
 
 ## Project rules
 
-- **Money comes from the server.** The client only names `product` (`single`/`pack`); the price is read from env and the product/amount are stored on the session record. The job records its paid product only in the webhook.
+- **Production refuses mocks by default.** `lib/config-check.ts` gates `/api/generate` and `/api/checkout` with 503 `misconfigured`; `ALLOW_MOCK_PROVIDERS=true` is only for a labelled demo. Never bypass the guard in an API route.
+- **Health exposes names, never values.** `/api/health` may list missing variables and driver names, never keys or secrets.
+- **The provider verifier must stay offline-testable and redacted.** Keep the HTTP layer injectable, call nothing in `--dry-run`, and run every printed string through `redact()`.- **Money comes from the server.** The client only names `product` (`single`/`pack`); the price is read from env and the product/amount are stored on the session record. The job records its paid product only in the webhook.
 - **Pack extras are post-payment only.** Never generate, preview or store a pending style before the verified webhook. Each style claim is an atomic KV key with a TTL (`2 × GENERATION_TIMEOUT_MS + 30 s`); the success page and cron must share that path, `generating` assets older than one timeout are reclaimable, and the chosen style is never regenerated.
 - **Webhook idempotency is an atomic claim.** The event id is stored with SET NX before any side effect and released only if processing throws, so simultaneous deliveries record one sale.
 - **Download and share tokens use separate HMAC contexts.** Download tokens are bound to job + style + expiry; share tokens are signed under a distinct context and only issued to paid sessions.

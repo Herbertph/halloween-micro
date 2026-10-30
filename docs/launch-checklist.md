@@ -47,13 +47,20 @@ Do these in order; each one produces values that go into the Vercel environment 
    must not stay at the dev defaults are `NEXT_PUBLIC_SITE_URL`, `CONTACT_EMAIL`,
    `PAYMENT_PROVIDER=stripe`, `IMAGE_PROVIDER=gemini`, `STORAGE_DRIVER=vercel-blob`,
    `KV_DRIVER=upstash`, both Stripe price ids, `DOWNLOAD_SIGNING_SECRET`,
-   `MOCK_WEBHOOK_SECRET`, `CRON_SECRET`, `ADMIN_PASSWORD`.
+   `MOCK_WEBHOOK_SECRET`, `CRON_SECRET`, `ADMIN_PASSWORD`. Keep
+   `ALLOW_MOCK_PROVIDERS=false`; the server refuses mock/local configuration in production
+   unless that flag deliberately turns the deploy into a labelled demo.
 4. Check the function duration limit of the plan. The preview request can run up to ~130 s
    and the pack cron declares 420 s. If the plan caps lower, tell the team before launch:
    the fallback is moving generation to a job queue.
 5. Cron entries already ship in `vercel.json` (`cleanup` hourly, `expand-packs` every 5 min).
 6. Buy the domain, point it at the deployment, then set `NEXT_PUBLIC_SITE_URL` to it and
    redeploy — the watermark, canonical URLs and Open Graph tags read that value.
+7. Confirm `GET /api/health` returns `{ "ready": true, "mode": "live" }`. If it returns 503,
+   the `problems` array names what is missing or still mocked.
+8. From a machine with the production env, run `npm run verify:providers` (start with
+   `npm run verify:providers:dry` if the env shape is new) and keep the output: every
+   configured service must print `PASS`, with no secret in the table.
 
 ### 1.5 Content the team cannot create
 
@@ -75,20 +82,22 @@ Do these in order; each one produces values that go into the Vercel environment 
 
 ## 3. Team: what ships before launch
 
-- A production safety guard that refuses to run with mock providers or local disk storage in
-  production, so a deploy can never sell "nothing" or lose photos (increment 3).
-- `npm run verify:providers`, one command that checks Gemini, Stripe, Blob, Upstash and
-  Turnstile with the configured keys and prints a pass/fail table without printing secrets
-  (increment 3).
-- Integration tests for the production storage and KV drivers, which have never run against
-  a real service (increment 3).
-- Hardening backlog: idempotent sale recording, `Secure` cookie, EXIF-rotated share images,
-  and the async generation contract (#5).
+- **Shipped (increment 3):** a production safety guard that refuses mock providers and local
+  disk storage unless `ALLOW_MOCK_PROVIDERS=true`, `/api/health`, and a visible demo label.
+- **Shipped (increment 3):** `npm run verify:providers`, the manual gate that probes Gemini,
+  Stripe, Blob, Upstash and Turnstile and prints a redacted pass/fail table.
+- **Shipped (increment 3):** Blob and Upstash integration tests against a local HTTP stub,
+  including timeout and conditional-delete race coverage.
+- **Shipped (increment 3):** idempotent sale recording per session, `Secure` admin cookie on
+  HTTPS, and EXIF-rotated share composites.
+- Remaining backlog: the async generation contract (#5) and the plan-duration decision.
 
 ## 4. Known gaps at the time of writing
 
 - No keys exist on the machine, so every provider runs in mock mode: the preview is a
-  colour-graded copy of the photo with a "MOCK" label, not an AI portrait.
+  colour-graded copy of the photo with a "MOCK" label, not an AI portrait. A production
+  deploy refuses that configuration unless `ALLOW_MOCK_PROVIDERS=true`, which labels it as a
+  demo.
 - Nothing is deployed; the only way to look at the site is the local dev server.
 - The landing examples are placeholders.
 - `#5` (synchronous generation) is still open and depends on the hosting plan's duration

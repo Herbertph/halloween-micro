@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { hasPendingAssets, normalizeJob } from "@/lib/assets";
+import { generationTimeoutMs } from "@/lib/env";
 import { getImageProvider } from "@/lib/providers/image";
 import { getKv } from "@/lib/kv";
 import { runGeneration } from "@/lib/generation";
@@ -14,15 +15,18 @@ import { incrementGenerations } from "@/lib/stats";
 import { getStorage } from "@/lib/storage";
 import type { Asset, GenerateError, Job, StyleId } from "@/lib/types";
 
-const CLAIM_PREFIX = "claims:";
 const EDIT_LOCK_TTL_SECONDS = 5;
 const EDIT_LOCK_WAIT_MS = 50;
 const EDIT_LOCK_TRIES = 20;
-export const MAX_EXPANSIONS_PER_RUN = 4;
+/** Long enough for two full generation attempts; expired claims are reclaimable. */
+const CLAIM_TTL_SECONDS = Math.ceil((2 * generationTimeoutMs()) / 1000) + 30;
+/** A `generating` asset older than one attempt budget is treated as crashed. */
+const STALE_GENERATING_MS = generationTimeoutMs();
+export const MAX_EXPANSIONS_PER_RUN = 3;
 export const PACK_SWEEP_MIN_AGE_MS = 60_000;
 
-function claimsKey(jobId: string): string {
-  return `${CLAIM_PREFIX}${jobId}`;
+function claimKey(jobId: string, styleId: StyleId): string {
+  return `claim:${jobId}:${styleId}`;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -65,8 +69,20 @@ async function updateAsset(
   return null;
 }
 
-async function releaseClaim(jobId: string, styleId: StyleId): Promise<void> {
-  await getKv().setRemove(claimsKey(jobId), styleId);
+async function releaseClaim(
+  jobId: string,
+  styleId: StyleId,
+  token: string,
+): Promise<void> {
+  await getKv().deleteIfValue(claimKey(jobId, styleId), token);
+}
+
+function isReclaimable(asset: Asset, now: number): boolean {
+  if (asset.status === "pending") return true;
+  if (asset.status !== "generating") return false;
+  if (!asset.startedAt) return true;
+  const started = Date.parse(asset.startedAt);
+  return !Number.isFinite(started) || now - started >= STALE_GENERATING_MS;
 }
 
 export interface ExpandResult {
@@ -75,9 +91,10 @@ export interface ExpandResult {
 }
 
 /**
- * Claims and generates at most one asset. The claim is atomic in KV, so the
- * client and the cron sweeper can race without generating the same style twice.
- * The chosen style (ready from the preview) is never a candidate.
+ * Claims and generates at most one asset. The claim is an atomic KV key with a
+ * TTL, so a crashed worker stops blocking after the generation budget and the
+ * style can be reclaimed. The chosen style (ready from the preview) is never a
+ * candidate.
  */
 export async function expandJob(
   jobId: string,
@@ -89,6 +106,7 @@ export async function expandJob(
   }
 
   const assets = normalizeJob(job).assets ?? [];
+  const now = Date.now();
   let candidates: Asset[];
   if (options.styleId) {
     const retry = assets.find(
@@ -98,15 +116,24 @@ export async function expandJob(
     if (!retry) return { job, generated: false };
     candidates = [retry];
   } else {
-    candidates = assets.filter((asset) => asset.status === "pending");
+    candidates = assets.filter((asset) => isReclaimable(asset, now));
   }
   if (candidates.length === 0) return { job, generated: false };
 
   const kv = getKv();
   let claimed: Asset | undefined;
+  let claimToken = "";
   for (const candidate of candidates) {
-    if (await kv.setAddIfAbsent(claimsKey(job.id), candidate.styleId)) {
+    const token = randomUUID();
+    if (
+      await kv.setIfAbsent(
+        claimKey(job.id, candidate.styleId),
+        token,
+        CLAIM_TTL_SECONDS,
+      )
+    ) {
       claimed = candidate;
+      claimToken = token;
       break;
     }
   }
@@ -119,7 +146,7 @@ export async function expandJob(
     error: undefined,
   });
   if (!generating) {
-    await releaseClaim(job.id, styleId);
+    await releaseClaim(job.id, styleId, claimToken);
     return { job: null, generated: false };
   }
 
@@ -131,18 +158,23 @@ export async function expandJob(
       status: "failed",
       error: "fatal",
     });
-    await releaseClaim(job.id, styleId);
+    await releaseClaim(job.id, styleId, claimToken);
     return { job: failed ?? generating, generated: false };
   }
 
-  const result = await runGeneration(
-    { image: original, styleId },
-    {
-      provider: getImageProvider(),
-      onAttempt: () => incrementGenerations(),
-      retryAll: true,
-    },
-  );
+  let result: Awaited<ReturnType<typeof runGeneration>>;
+  try {
+    result = await runGeneration(
+      { image: original, styleId },
+      {
+        provider: getImageProvider(),
+        onAttempt: () => incrementGenerations(),
+        retryAll: true,
+      },
+    );
+  } catch {
+    result = { error: "fatal" };
+  }
 
   if ("error" in result) {
     const failed = await updateAsset(job.id, styleId, {
@@ -150,18 +182,41 @@ export async function expandJob(
       error: result.error as GenerateError,
     });
     // Failed styles are retryable: free the claim so an explicit retry works.
-    await releaseClaim(job.id, styleId);
+    await releaseClaim(job.id, styleId, claimToken);
     return { job: failed ?? generating, generated: true };
   }
 
   const fullKey = `blobs/${randomUUID()}.jpg`;
-  await getStorage().put(fullKey, result.fullRes, "image/jpeg");
+  let stored = false;
+  try {
+    await getStorage().put(fullKey, result.fullRes, "image/jpeg");
+    stored = true;
+  } catch {
+    stored = false;
+  }
+
+  if (!stored) {
+    const failed = await updateAsset(job.id, styleId, {
+      status: "failed",
+      error: "transient",
+    });
+    await releaseClaim(job.id, styleId, claimToken);
+    return { job: failed ?? generating, generated: true };
+  }
+
   const ready = await updateAsset(job.id, styleId, {
     status: "ready",
     fullKey,
     error: undefined,
   });
-  return { job: ready ?? generating, generated: true };
+  if (!ready) {
+    // The claim is freed so the stale `generating` asset can be reclaimed.
+    await releaseClaim(job.id, styleId, claimToken);
+    return { job: generating, generated: true };
+  }
+  // Keep the claim until its TTL: the asset is ready, so no legitimate caller
+  // re-generates it, and a late racing caller is blocked.
+  return { job: ready, generated: true };
 }
 
 /**

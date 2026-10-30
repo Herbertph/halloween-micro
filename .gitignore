@@ -1,6 +1,12 @@
 # Dependencies and build output
 node_modules/
 dist/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# Runtime data (local storage + KV drivers)
+.data/
 
 # Playwright
 test-results/
@@ -15,5 +21,9 @@ playwright/.cache/
 # Environment and OS files
 .env
 .env.*
+!.env.example
 .DS_Store
 Thumbs.db
+
+# Coverage
+coverage/

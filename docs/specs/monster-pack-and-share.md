@@ -1,7 +1,10 @@
 # Spec: Monster Pack, share image, Turnstile and admin (increment 2)
 
 - **Branch:** `feature/monster-pack-and-share`
-- **Status:** ready for development
+- **Status:** implemented in this branch; QA verdict PASS (see `docs/test-reports/monster-pack-and-share.md`).
+  Amended after QA: claim recovery and cron budget (FR-9), simultaneous webhook deliveries
+  (AC-8), secret-list synchronisation (AC-29), admin counting rule (AC-23), axe coverage
+  (AC-28), test-naming note.
 - **Builds on:** `docs/specs/haunted-portrait-mvp.md` (increment 1, merged in #8)
 - **Why now:** increment 1 takes $4.99 for one portrait. Increment 2 adds the $8.99
   multi-style upsell, the shareable before/after image that drives social traffic, the
@@ -79,9 +82,16 @@ only what exists.
   it polls, calls expand for the next one, shows per-card loading states and fills each card
   as it becomes ready. Each asset has its own download button.
 - **FR-9** — `GET /api/cron/expand-packs` (bearer `CRON_SECRET`) sweeps paid pack jobs with
-  pending assets older than 60 s and runs the same claim-and-generate path, bounded to a
-  small number of styles per run, so a closed tab still delivers what was paid for. It is
-  documented as a Vercel Cron entry next to the cleanup cron.
+  pending assets older than 60 s and runs the same claim-and-generate path, so a closed tab
+  still delivers what was paid for. It is documented as a Vercel Cron entry next to the
+  cleanup cron. **Time budget:** at most 3 styles per run and `maxDuration = 420`, sized as
+  3 × (2 × `GENERATION_TIMEOUT_MS` + 10 s); a run that is killed is recovered by the claim
+  TTL, and anyone raising the provider timeout must re-check these two numbers together.
+- **FR-9a** — A per-style claim is held under `claim:<jobId>:<styleId>` with a TTL of
+  `2 × GENERATION_TIMEOUT_MS + 30 s`. A claim is reclaimable when the asset is `pending`, or
+  `generating` with no `startedAt` or a start older than `GENERATION_TIMEOUT_MS`. Failed
+  attempts release the claim; a successful one keeps it until the TTL so a late racing
+  caller cannot regenerate a ready style.
 - **FR-10** — A failed extra style is retried once automatically; if it still fails, only
   that card shows a retry action, the other assets stay delivered, and the retry never
   consumes the free-preview quota or asks for payment again.
@@ -173,8 +183,9 @@ providers and disk storage/KV.
 - **AC-7** — Before payment, a pack job exposes only the chosen style's watermarked preview;
   the other three styles have no preview, no download URL and no full-res bytes reachable
   through `/api/assets` or `/api/download`.
-- **AC-8** — The same webhook delivered twice generates no extra styles (three extra calls
-  total, not six) and leaves the job unlocked once.
+- **AC-8** — The same webhook delivered twice — including two **simultaneous** deliveries —
+  generates no extra styles (three extra calls total, not six), records one sale and leaves
+  the job unlocked once. The event id is claimed atomically before any side effect.
 - **AC-9** — Two concurrent expand calls for the same job generate at most one asset each,
   never the same style twice, and the cron sweeper plus a client call together still
   produce exactly three extra assets.
@@ -216,6 +227,9 @@ providers and disk storage/KV.
 - **AC-23** — With the correct password the page shows today's previews, single sales, pack
   sales, revenue, estimated cost and margin, matching the counters after a scripted
   day (2 previews, 1 single, 1 pack → revenue $13.98, cost = generations × 4 cents).
+  **Counting rule:** a preview is counted when a preview image is produced (not on a rejected
+  or failed attempt); a generation is counted per provider attempt, retries included; a sale
+  is counted once per paid session, so a replayed webhook never inflates revenue.
 - **AC-24** — The authenticated cookie is HttpOnly, SameSite=Lax and expires in 8 hours;
   logging out clears it and the numbers disappear again.
 - **AC-25** — The admin page renders no job ids, storage keys or images.
@@ -227,10 +241,13 @@ providers and disk storage/KV.
 - **AC-27** — Pack purchase completes on the iPhone 13 and Pixel 7 Playwright profiles,
   including the four cards and one download.
 - **AC-28** — Lighthouse mobile on `/` and `/create` stays at performance ≥ 85 and
-  accessibility ≥ 90; axe reports no critical violations on `/`, `/create`, `/success` and
-  `/admin`.
+  accessibility ≥ 90; axe reports no critical violations on `/`, `/create`, the success page
+  in both the locked and the unlocked state, and `/admin` in both the signed-out form and
+  the signed-in view.
 - **AC-29** — `npm run check:secrets` stays clean: `TURNSTILE_SECRET_KEY`, `ADMIN_PASSWORD`,
-  prompts and download/share secrets never appear in `.next/static/**`.
+  prompts and download/share secrets never appear in `.next/static/**`. The scanned name list
+  in the script and the assertion in the bundle test must be kept in sync — adding a secret
+  means updating both in the same commit.
 - **AC-30** — Every `process.env` name read by the code appears in `.env.example`.
 
 ## Assumptions (please confirm in review)
@@ -358,6 +375,29 @@ Tests use their own ports (Playwright serves on 3101); never port 4545.
    Verify: AC-22 to AC-25.
 10. **Pricing copy + quality pass** — landing/paywall copy, README, `CLAUDE.md`,
     `.env.example`, secret scan, a11y/Lighthouse, full regression. Verify: AC-26 to AC-30.
+
+### Test naming
+
+Increment 1 and increment 2 both number their criteria AC-1..AC-30, so a bare test title is
+ambiguous across specs. Until the next revision renames them, the convention is: test titles
+keep `AC-<n>` and are disambiguated by their file (`tests/routes/pack.test.ts`,
+`e2e/journey.spec.ts`), while this spec's criteria are referred to as `MP-AC-<n>` in issues,
+PRs and backlog items. **Increment 3 must prefix its criteria (`MP3-AC-<n>`) from the start.**
+
+### Residual hardening (not blockers, owner decision)
+
+- If `recordSale()` fails after the job is saved, the webhook claim is released and a provider
+  retry sees a paid job, so the sale can be missing from the admin view while payment and
+  download are correct. Admin is explicitly a convenience view; a future change should record
+  sales idempotently by session id.
+- The admin cookie does not set `Secure`; it is only sent over the production HTTPS origin.
+  Set it before the cookie is reused anywhere else.
+- `maxDuration = 420` on the expand-packs cron may exceed a low Vercel plan cap; the README
+  tells the operator to lower `GENERATION_TIMEOUT_MS` or the per-run expansion count.
+- The share composite reads source dimensions before applying EXIF orientation; portrait and
+  landscape without EXIF are covered, rotated phone photos are not.
+- The real Turnstile verifier is exercised only by a manual probe with Cloudflare's test
+  keys; the automated suite covers reject/pass/timeout through the mock verifier.
 
 ### Risks
 

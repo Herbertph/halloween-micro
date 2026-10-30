@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3101
+      IMAGE_PROVIDER: mock
+      PAYMENT_PROVIDER: mock
+      STORAGE_DRIVER: local
+      KV_DRIVER: local
+      DATA_DIR: .data/ci
+      DOWNLOAD_SIGNING_SECRET: ci-download-signing-secret-not-real
+      MOCK_WEBHOOK_SECRET: ci-mock-webhook-secret-not-real
+      CRON_SECRET: ci-cron-secret-not-real
+      PRICE_SINGLE_CENTS: "499"
+      RETENTION_HOURS: "48"
+      PREVIEW_LIMIT_PER_IP: "3"
+      DAILY_GENERATION_CAP: "2000"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm run build
+
+      - run: npm test
+
+      - run: npm run check:secrets
+
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

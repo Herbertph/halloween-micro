@@ -6,15 +6,56 @@ Built with a multi-agent pipeline: requirements analyst → developer → tester
 
 ## Stack
 
-To be defined by the first feature (MVP). The developer fills this in after scaffolding.
+- Next.js (App Router) + React 19 + TypeScript on Vercel.
+- Tailwind CSS; no component library. Self-hosted fonts via Fontsource.
+- `sharp` for decoding, EXIF stripping, resizing, watermarking and the mock provider.
+- `heic2any` (browser only, dynamically imported) for HEIC conversion.
+- Vitest + Testing Library for unit, route-handler and component tests.
+- Playwright (+ axe-core) for end-to-end and accessibility tests.
+- Storage/KV behind small interfaces: disk drivers for dev/tests, Vercel Blob + Upstash in production.
 
 ## Commands
 
-To be defined by the first feature. List install, dev server, build, unit test and end-to-end test commands here.
+| Command | Purpose |
+| --- | --- |
+| `npm install` | Install dependencies (Node 22+). |
+| `npm run dev` | Dev server at http://localhost:3000 (mock providers by default). |
+| `npm run build` | Production build. |
+| `npm start` | Serve the production build. |
+| `npm run lint` | ESLint. |
+| `npm test` | Vitest unit, route and component tests. |
+| `npm run e2e` | Playwright e2e (build first; serves on port 3101, never 4545). |
+| `npm run check:secrets` | Scan `.next/static` for secrets/prompt text (after build). |
+| `npm run assets` | Regenerate placeholder landing/OG images. |
+| `npm run fixtures` | Regenerate test fixtures. |
+
+Full gate: `npm run lint && npm run build && npm test && npm run check:secrets && npm run e2e`.
+Lighthouse budget (opt-in): `RUN_LIGHTHOUSE=1 npx playwright test e2e/lighthouse.spec.ts`.
 
 ## Structure
 
-To be defined by the first feature.
+```
+app/                    routes: /, /create, /success, /privacy, /terms,
+                        /checkout/mock, /api/generate, /api/jobs/[id],
+                        /api/preview/[id], /api/checkout,
+                        /api/webhooks/payments, /api/download, /api/cron/cleanup
+components/             landing chrome, upload/paywall form, success poller
+config/styles.ts        style ids, names, descriptions, prompts (server only)
+lib/providers/          image (mock, gemini) and payments (mock, stripe) adapters
+lib/storage/            storage interface + local disk and Vercel Blob drivers
+lib/kv/                 kv interface + local disk and Upstash drivers
+lib/jobs.ts             pure job state machine, transitions, expiry
+lib/job-service.ts      persistence, lazy retention, cleanup, public job view
+lib/images.ts           EXIF strip, resize, watermark, featureless detection
+lib/generation.ts       timeout + one-retry generation boundary
+lib/limits.ts           per-IP rolling window and global daily cap
+lib/tokens.ts           HMAC download tokens (15 minutes)
+lib/analytics.ts        Plausible events (no-op when unset)
+lib/client/image.ts     browser validation, HEIC conversion, 1536 px resize
+tests/                  unit, route, component tests and fixtures
+e2e/                    Playwright journeys, axe checks, Lighthouse budget
+scripts/                asset/fixture generators and the bundle secret scan
+```
 
 - `docs/specs/`: feature specs written by the requirements analyst
 - `docs/test-cases/`: test cases (TC-n, with steps and expected results) written by the tester
@@ -30,6 +71,20 @@ To be defined by the first feature.
 - Name tests after behavior. Acceptance tests start with their criterion ID, for example `AC-2: rejects a blank title`.
 - Commits follow Conventional Commits: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `chore:`.
 - Feature branches are named `feature/<slug>`, or keep the branch Claude Code created for a worktree session. Never commit to `main`.
+
+## Project rules
+
+- **Counters and indexes use atomic KV operations.** Never read-modify-write the per-IP
+  window, the daily cap or `jobs:index` from application code: `lib/kv` exposes
+  `addToRollingWindow`, `incr`, and atomic set add/remove for exactly this reason.
+- **Secrets stay server-side.** Only `NEXT_PUBLIC_*` variables may reach the browser. `config/styles.ts` and `lib/env.ts` are server-only; prompts are never serialised, logged or returned.
+- **The full-resolution object never leaks.** It has a random private key, is read only by `/api/download`, and that route requires a paid job plus a valid 15-minute HMAC token. Keep preview and full-res as separate objects.
+- **Every `process.env` read must be listed in `.env.example`.** `tests/unit/env.test.ts` enforces it.
+- **Job transitions are one-way** and validated in `lib/jobs.ts`. Do not write statuses directly.
+- **Tests own their ports and data.** Unit tests use a per-file temp `DATA_DIR`; Playwright serves on `E2E_PORT` (default 3101) and never touches 4545.
+- **The CSP allows `'unsafe-eval'` on purpose.** `heic2any`'s WASM worker needs it; keep script origins locked to self + Plausible. The HEIC path has a timeout and a fallback message, so never make the decoder mandatory for the flow.
+- **Controllers stay thin.** Validation lives in `lib/api.ts`, orchestration in `lib/*-service` or route handlers, pure logic in `lib/`.
+- **Mock providers are the default** so the flow is demoable offline. Stripe/Gemini ship wired but unverified; do not exercise them in CI.
 
 ## Definition of done
 

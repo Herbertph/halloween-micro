@@ -28,6 +28,20 @@ export type JobStatus =
   | "unlocked"
   | "expired";
 
+export type Product = "single" | "pack";
+
+export type AssetStatus = "pending" | "generating" | "ready" | "failed";
+
+export interface Asset {
+  styleId: StyleId;
+  status: AssetStatus;
+  fullKey?: string;
+  previewKey?: string;
+  error?: GenerateError;
+  /** Set when a worker claims the asset, so a crashed claim can be reclaimed. */
+  startedAt?: string;
+}
+
 export interface PublicStyle {
   id: StyleId;
   name: string;
@@ -48,6 +62,18 @@ export interface Job {
   sessionId?: string;
   paidAt?: string;
   unlockedAt?: string;
+  product?: Product;
+  assets?: Asset[];
+  paidAmountCents?: number;
+}
+
+/** One asset as exposed by the API: no storage keys, ever. */
+export interface PublicAsset {
+  styleId: StyleId;
+  status: AssetStatus;
+  previewUrl?: string;
+  downloadUrl?: string;
+  error?: GenerateError;
 }
 
 /**
@@ -62,7 +88,10 @@ export interface PublicJob {
   expiresAt: string;
   previewUrl?: string;
   downloadUrl?: string;
+  shareUrl?: string;
   error?: GenerateError;
+  product?: Product;
+  assets?: PublicAsset[];
 }
 
 export type ApiErrorCode =
@@ -72,6 +101,7 @@ export type ApiErrorCode =
   | "unsupported_format"
   | "invalid_image"
   | "invalid_style"
+  | "invalid_product"
   | "rate_limited"
   | "capacity"
   | "job_not_found"

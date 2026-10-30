@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { getKv } from "@/lib/kv";
+import type { Product } from "@/lib/types";
 
 export type SessionStatus = "pending" | "paid" | "declined";
 
@@ -8,6 +9,7 @@ export interface PaymentSession {
   id: string;
   jobId: string;
   amountCents: number;
+  product: Product;
   status: SessionStatus;
   createdAt: string;
 }
@@ -18,12 +20,14 @@ export async function createSessionRecord(input: {
   id?: string;
   jobId: string;
   amountCents: number;
+  product?: Product;
   now?: Date;
 }): Promise<PaymentSession> {
   const session: PaymentSession = {
     id: input.id ?? `cs_mock_${randomUUID().replace(/-/g, "")}`,
     jobId: input.jobId,
     amountCents: input.amountCents,
+    product: input.product ?? "single",
     status: "pending",
     createdAt: (input.now ?? new Date()).toISOString(),
   };

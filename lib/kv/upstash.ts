@@ -74,8 +74,12 @@ export class UpstashKV implements KV {
   }
 
   async incr(key: string, exSeconds?: number): Promise<number> {
-    const next = await this.command<number>("INCR", key);
-    if (next === 1 && exSeconds) {
+    return this.incrBy(key, 1, exSeconds);
+  }
+
+  async incrBy(key: string, amount: number, exSeconds?: number): Promise<number> {
+    const next = await this.command<number>("INCRBY", key, String(amount));
+    if (exSeconds) {
       await this.command("EXPIRE", key, String(exSeconds));
     }
     return next;
@@ -83,6 +87,32 @@ export class UpstashKV implements KV {
 
   async setAdd(key: string, member: string): Promise<void> {
     await this.command("SADD", key, member);
+  }
+
+  async setAddIfAbsent(key: string, member: string): Promise<boolean> {
+    const added = await this.command<number>("SADD", key, member);
+    return added === 1;
+  }
+
+  async setIfAbsent(
+    key: string,
+    value: string,
+    exSeconds?: number,
+  ): Promise<boolean> {
+    const args = ["SET", key, value, "NX"];
+    if (exSeconds) args.push("EX", String(exSeconds));
+    const result = await this.command<string | null>(...args);
+    return result === "OK";
+  }
+
+  async deleteIfValue(key: string, value: string): Promise<void> {
+    await this.command(
+      "EVAL",
+      "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end",
+      "1",
+      key,
+      value,
+    );
   }
 
   async setRemove(key: string, member: string): Promise<void> {

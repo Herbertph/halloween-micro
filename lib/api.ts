@@ -29,6 +29,7 @@ export interface GenerateInput {
 
 export interface ParsedGenerateRequest extends GenerateInput {
   ipHash: string;
+  turnstileToken?: string;
 }
 
 /**
@@ -65,7 +66,15 @@ export async function parseGenerateRequest(
   }
 
   const image = Buffer.from(await file.arrayBuffer());
-  return { image, styleId, ipHash };
+  const token = form.get("turnstileToken");
+  return {
+    image,
+    styleId,
+    ipHash,
+    ...(typeof token === "string" && token.length > 0
+      ? { turnstileToken: token }
+      : {}),
+  };
 }
 
 export async function readJson<T>(request: NextRequest | Request): Promise<T> {

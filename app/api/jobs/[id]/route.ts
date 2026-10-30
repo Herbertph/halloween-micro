@@ -25,11 +25,9 @@ export async function GET(
   const sessionId = url.searchParams.get("session");
   const session = sessionId ? await getSession(sessionId) : null;
   const ownsJob = Boolean(session && session.jobId === job.id);
+  const paidOwner = ownsJob && session?.status === "paid";
 
-  const view = publicJobView(job);
-  if (!ownsJob || session?.status !== "paid") {
-    delete view.downloadUrl;
-  }
+  const view = publicJobView(job, { paidOwner });
 
   return Response.json(
     { job: view, payment: ownsJob ? session?.status : undefined },

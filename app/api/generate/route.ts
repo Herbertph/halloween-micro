@@ -2,14 +2,17 @@ import { randomUUID } from "node:crypto";
 
 import { siteHost } from "@/lib/env";
 import { ApiError, apiErrorResponse, parseGenerateRequest } from "@/lib/api";
+import { verifyCaptcha } from "@/lib/captcha";
 import { runGeneration } from "@/lib/generation";
 import { detectImageType, makePreview, stripMetadata } from "@/lib/images";
 import { createJob, saveJob } from "@/lib/job-service";
 import { transition } from "@/lib/jobs";
 import { consumeDailyGeneration, consumePreviewAttempt } from "@/lib/limits";
 import { clientIpHash } from "@/lib/request-ip";
+import { incrementGenerations, incrementPreviews } from "@/lib/stats";
 import { getStorage } from "@/lib/storage";
 import { getImageProvider } from "@/lib/providers/image";
+import type { Asset } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +28,16 @@ export async function POST(request: Request): Promise<Response> {
     const input = await parseGenerateRequest(request, ipHash);
     if (!detectImageType(input.image)) {
       throw new ApiError("unsupported_format", 400);
+    }
+
+    // Turnstile runs before any quota or provider work. A rejection must not
+    // consume the visitor's preview allowance.
+    const captcha = await verifyCaptcha(input.turnstileToken);
+    if (!captcha.ok) {
+      if (captcha.reason === "captcha_timeout") {
+        return Response.json({ error: "captcha_timeout" }, { status: 503 });
+      }
+      return Response.json({ error: "captcha_failed" }, { status: 400 });
     }
 
     // Decode and strip EXIF/GPS before any budget is consumed or anything is
@@ -64,12 +77,18 @@ export async function POST(request: Request): Promise<Response> {
 
     const result = await runGeneration(
       { image: stripped, styleId: input.styleId },
-      { provider: getImageProvider() },
+      {
+        provider: getImageProvider(),
+        onAttempt: () => incrementGenerations(),
+      },
     );
 
     if ("error" in result) {
       const failed = transition(generating, "failed");
       failed.error = result.error;
+      failed.assets = [
+        { styleId: input.styleId, status: "failed", error: result.error },
+      ];
       await saveJob(failed);
       return Response.json(
         { jobId: failed.id, status: failed.status, error: result.error },
@@ -88,7 +107,15 @@ export async function POST(request: Request): Promise<Response> {
     const ready = transition(generating, "preview_ready");
     ready.fullKey = fullKey;
     ready.previewKey = previewKey;
+    const chosen: Asset = {
+      styleId: input.styleId,
+      status: "ready",
+      fullKey,
+      previewKey,
+    };
+    ready.assets = [chosen];
     await saveJob(ready);
+    await incrementPreviews();
 
     return Response.json(
       {

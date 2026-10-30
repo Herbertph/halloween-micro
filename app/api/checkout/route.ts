@@ -1,8 +1,8 @@
 import { ApiError, apiErrorResponse, readJson } from "@/lib/api";
-import { priceCents } from "@/lib/env";
-import { loadJob, saveJob } from "@/lib/job-service";
+import { loadJob, saveJob, applyProductToAssets } from "@/lib/job-service";
 import { transition } from "@/lib/jobs";
 import { getPaymentsProvider } from "@/lib/providers/payments";
+import { isProduct, productPriceCents, type Product } from "@/lib/products";
 import { createSessionRecord } from "@/lib/sessions";
 
 export const runtime = "nodejs";
@@ -10,9 +10,15 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request): Promise<Response> {
   try {
-    const body = await readJson<{ jobId?: unknown }>(request);
+    const body = await readJson<{ jobId?: unknown; product?: unknown }>(request);
     if (typeof body.jobId !== "string") {
       throw new ApiError("invalid_request", 400);
+    }
+    // Missing product stays valid for increment 1 clients and means "single".
+    let product: Product = "single";
+    if (body.product !== undefined) {
+      if (!isProduct(body.product)) throw new ApiError("invalid_product", 400);
+      product = body.product;
     }
 
     const job = await loadJob(body.jobId);
@@ -24,7 +30,9 @@ export async function POST(request: Request): Promise<Response> {
       throw new ApiError("invalid_state", 409);
     }
 
-    const amountCents = priceCents();
+    // Prices and product composition live on the server; the client only names
+    // the product.
+    const amountCents = productPriceCents(product);
     const session = await getPaymentsProvider().createSession({
       jobId: job.id,
       amountCents,
@@ -36,16 +44,26 @@ export async function POST(request: Request): Promise<Response> {
       id: session.sessionId,
       jobId: job.id,
       amountCents,
+      product,
     });
 
+    // A pack reserves its four assets at checkout; extras stay pending and are
+    // only generated after the webhook. The product itself is recorded on the
+    // job by the webhook, never here.
+    const withAssets =
+      product === "pack" ? applyProductToAssets(job, "pack") : job;
     const next =
-      job.status === "preview_ready" ? transition(job, "awaiting_payment") : job;
+      withAssets.status === "preview_ready"
+        ? transition(withAssets, "awaiting_payment")
+        : withAssets;
     next.sessionId = session.sessionId;
     await saveJob(next);
 
     return Response.json({
       sessionId: session.sessionId,
       url: session.url,
+      product,
+      amountCents,
     });
   } catch (error) {
     if (error instanceof ApiError) return apiErrorResponse(error);

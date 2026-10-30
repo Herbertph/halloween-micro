@@ -4,6 +4,7 @@ export const ANALYTICS_EVENTS = [
   "checkout_clicked",
   "payment_succeeded",
   "download_clicked",
+  "share_image_downloaded",
 ] as const;
 
 export type AnalyticsEvent = (typeof ANALYTICS_EVENTS)[number];

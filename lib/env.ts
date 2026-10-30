@@ -1,6 +1,5 @@
 import "server-only";
 
-export const DOWNLOAD_TOKEN_TTL_SECONDS = 15 * 60;
 
 const DEV_DOWNLOAD_SECRET = "dev-download-signing-secret-change-me";
 const DEV_WEBHOOK_SECRET = "dev-mock-webhook-secret-change-me";

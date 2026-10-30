@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 export const metadata = {
   title: "Your portrait",
   description: "Download your full-resolution haunted portrait.",
+  robots: { index: false, follow: false },
 };
 
 export default async function SuccessPage({

@@ -11,6 +11,7 @@ export const metadata = {
   title: "Create your haunted portrait",
   description:
     "Upload a photo, pick one of five Halloween styles and get a free watermarked preview.",
+  alternates: { canonical: "/create" },
 };
 
 export default async function CreatePage({

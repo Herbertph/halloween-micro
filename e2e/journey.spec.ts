@@ -28,7 +28,7 @@ test("AC-26: the full upload → preview → pay → unlock → download flow wo
     page.getByRole("heading", { name: /your portrait is ready/i }),
   ).toBeVisible({ timeout: 10_000 });
 
-  // AC-28: expiry notice with the exact deletion time.
+  // FR-28: expiry notice with the exact deletion time.
   await expect(
     page.getByText("Your images are deleted after 48 hours. Download them now."),
   ).toBeVisible();

@@ -3,7 +3,6 @@ import { createHmac, randomUUID } from "node:crypto";
 import { mockWebhookSecret } from "@/lib/env";
 
 import type {
-  CreateSessionInput,
   CreateSessionResult,
   PaymentsProvider,
   WebhookParseInput,
@@ -39,9 +38,7 @@ export function mockWebhookBody(input: {
  * a session, then a signed webhook is the only thing that unlocks a job.
  */
 export class MockPaymentsProvider implements PaymentsProvider {
-  async createSession(
-    _input: CreateSessionInput,
-  ): Promise<CreateSessionResult> {
+  async createSession(): Promise<CreateSessionResult> {
     const sessionId = `cs_mock_${randomUUID().replace(/-/g, "")}`;
     return {
       sessionId,

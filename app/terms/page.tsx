@@ -7,6 +7,7 @@ import { formatPrice } from "@/lib/format";
 export const metadata: Metadata = {
   title: "Terms",
   description: "The rules for using Haunted Portrait, refunds and content limits.",
+  alternates: { canonical: "/terms" },
 };
 
 export default function TermsPage() {

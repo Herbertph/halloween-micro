@@ -6,6 +6,7 @@ import { contactEmail } from "@/lib/env";
 export const metadata: Metadata = {
   title: "Privacy",
   description: "What Haunted Portrait stores, for how long and who processes your photo.",
+  alternates: { canonical: "/privacy" },
 };
 
 export default function PrivacyPage() {

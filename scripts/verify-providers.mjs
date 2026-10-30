@@ -78,8 +78,27 @@ async function probeGemini(env, http) {
     },
   );
   if (!response.ok) return statusFailure(response, "Gemini");
-  await bodyText(response);
-  return ok("PASS", `HTTP ${response.status}`);
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    return { status: "FAIL", reason: "Gemini returned invalid JSON" };
+  }
+  const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
+  const image = candidates
+    .flatMap((candidate) => (Array.isArray(candidate?.content?.parts) ? candidate.content.parts : []))
+    .find(
+      (part) =>
+        typeof part?.inlineData?.data === "string" && part.inlineData.data.length > 0,
+    );
+  if (!image) {
+    return {
+      status: "FAIL",
+      reason: "Gemini returned no image part (wrong model, text-only or blocked)",
+    };
+  }
+  return ok("PASS", `HTTP ${response.status} with an image part`);
 }
 
 async function probeStripe(env, http) {

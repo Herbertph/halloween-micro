@@ -68,6 +68,24 @@ describe("checkout products", () => {
     expect(session?.amountCents).toBe(899);
   });
 
+  it("AC-3: a missing product stays valid for increment 1 clients and means single", async () => {
+    const job = await makePreviewJob();
+    const response = await checkout(
+      jsonRequest("http://localhost/api/checkout", { jobId: job.id }),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      product: string;
+      amountCents: number;
+      sessionId: string;
+    };
+    expect(body.product).toBe("single");
+    expect(body.amountCents).toBe(499);
+    const session = await getSession(body.sessionId);
+    expect(session?.product).toBe("single");
+    expect(session?.amountCents).toBe(499);
+  });
+
   it("AC-4: records the product on the session, and on the job only after the webhook", async () => {
     const job = await makePreviewJob();
     const response = await checkout(

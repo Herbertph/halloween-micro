@@ -9,12 +9,14 @@ import { POST as checkout } from "@/app/api/checkout/route";
 import { POST as webhook } from "@/app/api/webhooks/payments/route";
 import { normalizeJob } from "@/lib/assets";
 import { sweepPacks } from "@/lib/expand";
+import { getKv } from "@/lib/kv";
 import { cleanupExpiredJobs, loadJob, saveJob } from "@/lib/job-service";
 import {
   MOCK_SIGNATURE_HEADER,
   mockWebhookBody,
   signMockWebhook,
 } from "@/lib/providers/payments/mock";
+import { dayKey, readDayStats } from "@/lib/stats";
 import { getStorage } from "@/lib/storage";
 import { signDownloadToken, signShareToken } from "@/lib/tokens";
 import type { PublicJob, StyleId } from "@/lib/types";
@@ -124,6 +126,18 @@ async function fetchDownload(url: string): Promise<Response> {
 describe("pack purchase", () => {
   it("AC-5: paying for a pack unlocks four assets with exactly three extra calls", async () => {
     const { job, sessionId } = await makePaidPackJob();
+
+    // Immediately after payment the chosen style is ready and the extras load.
+    const initial = await jobView(job.id, sessionId);
+    const chosen = initial.body.job.assets?.find(
+      (asset) => asset.styleId === job.styleId,
+    );
+    expect(chosen?.status).toBe("ready");
+    expect(chosen?.downloadUrl).toBeTruthy();
+    expect(
+      initial.body.job.assets?.filter((asset) => asset.status === "pending"),
+    ).toHaveLength(3);
+
     const final = await expandAll(job.id, sessionId);
 
     expect(providerState.calls).toHaveLength(3);
@@ -189,6 +203,15 @@ describe("pack purchase", () => {
     );
     expect(assetResponse.status).toBe(403);
 
+    // The chosen style's full-resolution object is also paid-only.
+    const chosenAssetResponse = await assetsRoute(
+      new Request(
+        `http://localhost/api/assets/${job.id}/${job.styleId}?session=${sessionId}`,
+      ),
+      { params: Promise.resolve({ jobId: job.id, styleId: job.styleId }) },
+    );
+    expect(chosenAssetResponse.status).toBe(403);
+
     const current = await loadJob(job.id);
     const downloadToken = signDownloadToken({
       jobId: job.id,
@@ -251,6 +274,37 @@ describe("pack purchase", () => {
     expect(providerState.calls).toHaveLength(3);
   });
 
+  it("AC-8: two simultaneous deliveries of the same event record one sale", async () => {
+    const job = await makePreviewPackJob("pumpkin");
+    const checkoutResponse = await checkout(
+      jsonRequest("http://localhost/api/checkout", {
+        jobId: job.id,
+        product: "pack",
+      }),
+    );
+    const { sessionId } = (await checkoutResponse.json()) as { sessionId: string };
+    const payload = mockWebhookBody({
+      eventId: "evt_pack_duplicate_concurrent",
+      sessionId,
+      jobId: job.id,
+    });
+
+    const [first, second] = await Promise.all([
+      webhook(webhookRequest(payload)),
+      webhook(webhookRequest(payload)),
+    ]);
+    expect([first.status, second.status]).toEqual([200, 200]);
+
+    const stats = await readDayStats(dayKey());
+    expect(stats.salesPack).toBe(1);
+    expect(stats.revenueCents).toBe(899);
+
+    const paid = await loadJob(job.id);
+    expect(paid?.status).toBe("unlocked");
+    expect(paid?.assets?.filter((asset) => asset.status === "pending")).toHaveLength(3);
+    expect(providerState.calls).toHaveLength(0);
+  });
+
   it("AC-9: concurrent expansions claim distinct styles and never duplicate work", async () => {
     const { job, sessionId } = await makePaidPackJob();
     await Promise.all([
@@ -300,6 +354,46 @@ describe("pack purchase", () => {
     expect(reloaded?.assets).toHaveLength(4);
     expect(reloaded?.assets?.every((asset) => asset.status === "ready")).toBe(true);
     expect(providerState.calls).toHaveLength(3);
+  });
+
+  it("AC-10: the sweeper recovers a pack asset left generating by a crashed worker", async () => {
+    const { job } = await makePaidPackJob({
+      paidAt: new Date(Date.now() - 120_000),
+    });
+    const current = await loadJob(job.id);
+    const assets = (current!.assets ?? []).map((asset, index) =>
+      index === 1
+        ? {
+            ...asset,
+            status: "generating" as const,
+            startedAt: new Date(Date.now() - 120_000).toISOString(),
+          }
+        : asset,
+    );
+    await saveJob({ ...current!, assets });
+
+    const result = await sweepPacks();
+    expect(result.expanded).toBeGreaterThanOrEqual(1);
+
+    const after = await loadJob(job.id);
+    expect(after?.assets?.every((asset) => asset.status === "ready")).toBe(true);
+  });
+
+  it("AC-10: a stale claim left by a crash does not strand a pending style", async () => {
+    const { job } = await makePaidPackJob({
+      paidAt: new Date(Date.now() - 120_000),
+    });
+    const current = await loadJob(job.id);
+    const pending = (current!.assets ?? []).find(
+      (asset) => asset.status === "pending",
+    );
+    expect(pending).toBeTruthy();
+    await getKv().setAdd(`claims:${job.id}`, pending!.styleId);
+
+    await sweepPacks();
+
+    const after = await loadJob(job.id);
+    expect(after?.assets?.every((asset) => asset.status === "ready")).toBe(true);
   });
 
   it("AC-11: one failed style can be retried without regenerating the ready ones", async () => {

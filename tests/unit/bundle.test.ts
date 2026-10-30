@@ -81,4 +81,14 @@ describe("client bundle", () => {
       ).toEqual([]);
     },
   );
+
+  it("AC-29: the check:secrets script scans the increment 2 secrets", async () => {
+    const script = await readFile(
+      path.join(process.cwd(), "scripts", "check-secrets.mjs"),
+      "utf8",
+    );
+    expect(script).toContain("DOWNLOAD_SIGNING_SECRET");
+    expect(script).toContain("TURNSTILE_SECRET_KEY");
+    expect(script).toContain("ADMIN_PASSWORD");
+  });
 });

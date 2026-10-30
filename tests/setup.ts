@@ -27,3 +27,6 @@ process.env.ADMIN_PASSWORD = "test-admin-password";
 process.env.TURNSTILE_SITE_KEY = "";
 process.env.TURNSTILE_SECRET_KEY = "";
 process.env.TURNSTILE_ENFORCED = "false";
+process.env.ALLOW_MOCK_PROVIDERS = "false";
+process.env.STRIPE_PRICE_SINGLE_ID = "price_test_single";
+process.env.STRIPE_PRICE_PACK_ID = "price_test_pack";

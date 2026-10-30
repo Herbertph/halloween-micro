@@ -99,6 +99,38 @@ describe("share composite", () => {
     expect(right.channels[2].mean).toBeGreaterThan(right.channels[0].mean);
   });
 
+  it("G3-AC-13: EXIF-rotated portrait sources are upright and landscape stays landscape", async () => {
+    const rotated = await fixture("rotated.jpg");
+    const metadata = await sharp(rotated).metadata();
+    expect(metadata.orientation).toBe(6);
+    expect(metadata.width).toBe(900);
+    expect(metadata.height).toBe(600);
+
+    const landscape = await fixture("valid.jpg");
+    const jpeg = await buildShareImage({
+      original: rotated,
+      portrait: landscape,
+      host: HOST,
+    });
+    const layout = shareLayout(
+      { width: 600, height: 900 },
+      { width: 900, height: 700 },
+    );
+    const composite = await sharp(jpeg).metadata();
+    expect(composite.width).toBe(layout.width);
+    expect(composite.height).toBe(layout.height);
+    // The rotated source's half is upright: taller than it is wide.
+    expect(layout.leftWidth).toBeLessThan(layout.imageHeight);
+
+    const landscapeJpeg = await buildShareImage({
+      original: landscape,
+      portrait: landscape,
+      host: HOST,
+    });
+    const landscapeMeta = await sharp(landscapeJpeg).metadata();
+    expect(landscapeMeta.width).toBeGreaterThan(landscapeMeta.height ?? 0);
+  });
+
   it("AC-13/AC-16: builds a landscape JPEG under 3 MB with a footer", async () => {
     const original = await fixture("valid.jpg");
     const portrait = await fixture("valid.jpg");

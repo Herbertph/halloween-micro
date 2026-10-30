@@ -187,6 +187,25 @@ confirm test-mode checkout and webhook signatures before taking real payments.
   owner before launch. They are not customer results.
 - Lighthouse runs only when explicitly requested (`RUN_LIGHTHOUSE=1`).
 
+### Known deviation: synchronous generation (FR-12, issue #5)
+
+`POST /api/generate` runs generation inside the request and returns 202 as soon as the
+preview is ready; `/create` does not poll a `generating` job. This is deliberate for
+increment 1 (the mock provider is fast, and Vercel does not guarantee work after the
+response), and it is bounded by `maxDuration = 120` plus the 2 × `GENERATION_TIMEOUT_MS`
+budget. Before enabling `IMAGE_PROVIDER=gemini`:
+
+1. Confirm the deployment plan allows 120 s function duration, or lower
+   `GENERATION_TIMEOUT_MS` so two attempts fit.
+2. Prefer replacing the inline call with a real job queue plus client polling (the
+   `/api/jobs/[id]` status endpoint already exists) if long provider calls are expected.
+
+### Rate limiting behind a proxy
+
+The client IP comes from the first `x-forwarded-for` entry, falling back to `x-real-ip`.
+That is correct on Vercel (which overwrites the header). On another proxy, configure it to
+overwrite or append a trusted client IP; otherwise the per-IP preview limit can be spoofed.
+
 ## Owner checklist before launch
 
 - [ ] Real Gemini key + `IMAGE_PROVIDER=gemini` verified.

@@ -74,6 +74,9 @@ scripts/                asset/fixture generators and the bundle secret scan
 
 ## Project rules
 
+- **Counters and indexes use atomic KV operations.** Never read-modify-write the per-IP
+  window, the daily cap or `jobs:index` from application code: `lib/kv` exposes
+  `addToRollingWindow`, `incr`, and atomic set add/remove for exactly this reason.
 - **Secrets stay server-side.** Only `NEXT_PUBLIC_*` variables may reach the browser. `config/styles.ts` and `lib/env.ts` are server-only; prompts are never serialised, logged or returned.
 - **The full-resolution object never leaks.** It has a random private key, is read only by `/api/download`, and that route requires a paid job plus a valid 15-minute HMAC token. Keep preview and full-res as separate objects.
 - **Every `process.env` read must be listed in `.env.example`.** `tests/unit/env.test.ts` enforces it.

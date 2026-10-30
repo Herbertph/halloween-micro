@@ -2,8 +2,8 @@
 
 - **Spec:** [`docs/specs/haunted-portrait-mvp.md`](../specs/haunted-portrait-mvp.md)
 - **Branch:** `feature/haunted-portrait-mvp`
-- **Commit under test:** `85537c7` (retest; first pass was `23e9426`)
-- **Test run:** retest after fixes for #1, #2, #3, #4, #6
+- **Commit under test:** `3149ccc` (second retest; first pass `23e9426`, first retest `85537c7`)
+- **Test run:** retest after the #7 fix; #5 remains deferred
 - **Frameworks:** Vitest + Testing Library (unit, route and component), Playwright (e2e, iPhone 13 + Pixel 7), Lighthouse (opt-in)
 
 ## Traceability summary
@@ -39,8 +39,8 @@
 | AC-27 | TC-35 | Pass |
 | AC-28 | TC-36 | Pass |
 | FR-9 (unhappy path) | TC-37 | Pass |
-| FR-7 (HEIC) | TC-40 | **Fail (#7)** |
-| FR-12 | TC-38 | **Fail (#5)** — deferred |
+| FR-7 (HEIC) | TC-40 | Pass (fixed #7) |
+| FR-12 | TC-38 | **Fail (#5)** — deferred for the Analyst |
 | Security review | TC-39 | Pass |
 
 ## Test cases
@@ -558,7 +558,7 @@
   2. Check for CSP, X-Frame-Options/`frame-ancestors`, X-Content-Type-Options and Referrer-Policy.
 - **Expected result:** Baseline headers present.
 - **Automated by:** `e2e/security.spec.ts` › `security headers are set on the landing page`
-- **Status:** Pass — verified in `85537c7`; the e2e test confirms CSP, nosniff, X-Frame-Options, Referrer-Policy and Permissions-Policy on both viewports. (Originally failed as #6; the CSP later caused #7.)
+- **Status:** Pass — verified in `85537c7`; the e2e test confirms CSP, nosniff, X-Frame-Options, Referrer-Policy and Permissions-Policy on both viewports. Since `3149ccc` the CSP also allows `'unsafe-eval'` for the HEIC decoder (documented trade-off); the header assertion still passes. (Originally failed as #6; the CSP later caused #7.)
 
 ### TC-40: An accepted HEIC upload converts in the browser (or shows the fallback message)
 - **Acceptance criterion:** FR-7 (and FR-6 / Assumption 5)
@@ -571,12 +571,13 @@
   2. Wait up to 60 s for the paywall preview or the "HEIC can't be read here — export as JPG" fallback.
 - **Expected result:** The HEIC is converted and the preview appears, or the decoder fails gracefully with the fallback message. The page must not stay on "Getting your photo ready…" forever.
 - **Automated by:** `e2e/heic.spec.ts` › `TC-40 (FR-7): a HEIC upload is converted in the browser`
-- **Status:** **Fail (#7)** — the production CSP blocks `heic2any`'s WASM worker (`new Function` is not allowed by `'wasm-unsafe-eval'`); the upload hangs with no fallback. The same fixture converts in `next dev`.
+- **Status:** Pass — verified in `3149ccc` on both viewports. The production CSP now allows `'unsafe-eval'` (required by `heic2any`'s Emscripten worker), the HEIC path tries native `createImageBitmap` first, and a 20 s timeout maps a blocked/broken decoder to the export-as-JPG fallback. A production probe of the fixture returns the preview (512 × 342) with no page errors. (Originally failed as #7.)
 
 ## Not covered
 
 - **Real Stripe and Gemini behaviour** — no keys exist in this increment; both adapters are explicitly unverified by the spec (Assumptions 2, FR-16, FR-23). Not testable here.
 - **HEIC on a real iPhone/Safari engine** — the Chromium + `heic2any` path is covered by TC-40 with a real HEIC fixture; WebKit/Safari is still not exercised. iOS camera capture normally yields JPEG (Assumption 5).
+- **The 20 s HEIC timeout/fallback path in automation** — `prepareImage` has a 20 s timeout that maps a blocked/broken decoder to the export-as-JPG message; the e2e test accepts either conversion or that fallback, but the timeout branch itself is not forced (it is verified by code review). The conversion path is covered end-to-end.
 - **Vercel Blob / Upstash drivers** — no accounts/tokens in this increment; only the local drivers are exercised. The atomic operations now have an Upstash Lua implementation, but it has not been run against a real Redis instance.
 - **10 MB uploads through Vercel's 4.5 MB serverless request-body limit** — a deployment constraint, not observable with the local server; the client normally resizes to well below it.
 - **Visual quality of the mock portrait and the placeholder landing assets** — owner task (Assumptions 6, 7).

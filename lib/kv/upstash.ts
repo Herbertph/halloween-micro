@@ -1,4 +1,33 @@
-import type { KV, SetOptions } from "./types";
+import type {
+  KV,
+  RollingWindowInput,
+  RollingWindowResult,
+  SetOptions,
+} from "./types";
+
+const ROLLING_WINDOW_SCRIPT = `
+local key = KEYS[1]
+local member = ARGV[1]
+local score = tonumber(ARGV[2])
+local window = tonumber(ARGV[3])
+local limit = tonumber(ARGV[4])
+local ttl = tonumber(ARGV[5])
+
+redis.call('ZADD', key, score, member)
+redis.call('ZREMRANGEBYSCORE', key, '-inf', score - window)
+local count = redis.call('ZCARD', key)
+local allowed = 1
+if count > limit then
+  redis.call('ZREM', key, member)
+  count = count - 1
+  allowed = 0
+end
+redis.call('EXPIRE', key, ttl)
+local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+local oldestScore = score
+if oldest[2] then oldestScore = tonumber(oldest[2]) end
+return {allowed, count, oldestScore}
+`;
 
 /**
  * Upstash Redis REST driver. Production only; no account is needed to develop
@@ -50,5 +79,39 @@ export class UpstashKV implements KV {
       await this.command("EXPIRE", key, String(exSeconds));
     }
     return next;
+  }
+
+  async setAdd(key: string, member: string): Promise<void> {
+    await this.command("SADD", key, member);
+  }
+
+  async setRemove(key: string, member: string): Promise<void> {
+    await this.command("SREM", key, member);
+  }
+
+  async setMembers(key: string): Promise<string[]> {
+    return (await this.command<string[] | null>("SMEMBERS", key)) ?? [];
+  }
+
+  async addToRollingWindow(
+    input: RollingWindowInput,
+  ): Promise<RollingWindowResult> {
+    const result = await this.command<number[]>(
+      "EVAL",
+      ROLLING_WINDOW_SCRIPT,
+      "1",
+      input.key,
+      input.member,
+      String(input.score),
+      String(input.windowMs),
+      String(input.limit),
+      String(input.ttlSeconds),
+    );
+    const [allowed, count, oldest] = result ?? [];
+    return {
+      allowed: Number(allowed) === 1,
+      count: Number(count) || 0,
+      oldest: Number(oldest) || input.score,
+    };
   }
 }

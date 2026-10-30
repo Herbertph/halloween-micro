@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { getKv } from "@/lib/kv";
 import { dailyGenerationCap, previewLimitPerIp } from "@/lib/env";
 
@@ -8,60 +10,39 @@ export type LimitResult =
   | { allowed: false; retryAt: Date };
 
 /**
- * Rolling 24 h window per client IP. The check and the write happen together so
- * a rejected attempt never consumes budget.
+ * Rolling 24 h window per client IP. The add, prune and count happen in one
+ * atomic KV operation, so parallel requests cannot read the same stale count.
  */
 export async function consumePreviewAttempt(
   ipHash: string,
   now: Date = new Date(),
 ): Promise<LimitResult> {
   const limit = previewLimitPerIp();
-  const kv = getKv();
-  const key = `rl:preview:${ipHash}`;
-  const raw = await kv.get(key);
-  let attempts: number[] = [];
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        attempts = parsed.filter(
-          (value): value is number =>
-            typeof value === "number" && value > now.getTime() - RATE_WINDOW_MS,
-        );
-      }
-    } catch {
-      attempts = [];
-    }
-  }
-  attempts.sort((a, b) => a - b);
-
-  if (attempts.length >= limit) {
-    const retryAt = new Date(attempts[0] + RATE_WINDOW_MS);
-    return { allowed: false, retryAt };
-  }
-
-  attempts.push(now.getTime());
-  await kv.set(key, JSON.stringify(attempts), {
-    exSeconds: Math.ceil(RATE_WINDOW_MS / 1000) + 60,
+  const result = await getKv().addToRollingWindow({
+    key: `rl:preview:${ipHash}`,
+    member: randomUUID(),
+    score: now.getTime(),
+    windowMs: RATE_WINDOW_MS,
+    limit,
+    ttlSeconds: Math.ceil(RATE_WINDOW_MS / 1000) + 60,
   });
-  return { allowed: true, remaining: Math.max(0, limit - attempts.length) };
+
+  if (!result.allowed) {
+    return { allowed: false, retryAt: new Date(result.oldest + RATE_WINDOW_MS) };
+  }
+  return { allowed: true, remaining: Math.max(0, limit - result.count) };
 }
 
 export function utcDateKey(now: Date): string {
   return now.toISOString().slice(0, 10);
 }
 
-/** Global daily cap; a refused attempt never increments the counter. */
+/** Global daily cap; the counter increment is atomic. */
 export async function consumeDailyGeneration(
   now: Date = new Date(),
 ): Promise<{ allowed: boolean }> {
   const cap = dailyGenerationCap();
   const key = `cap:generations:${utcDateKey(now)}`;
-  const kv = getKv();
-  const current = Number((await kv.get(key)) ?? "0");
-  if (Number.isFinite(current) && current >= cap) {
-    return { allowed: false };
-  }
-  await kv.incr(key, 48 * 60 * 60);
-  return { allowed: true };
+  const current = await getKv().incr(key, 48 * 60 * 60);
+  return { allowed: current <= cap };
 }

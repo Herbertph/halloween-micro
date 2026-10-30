@@ -1,0 +1,19 @@
+# Dependencies and build output
+node_modules/
+dist/
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Claude Code: personal settings and worktrees stay local
+.claude/settings.local.json
+.claude/worktrees/
+
+# Environment and OS files
+.env
+.env.*
+.DS_Store
+Thumbs.db

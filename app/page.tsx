@@ -1,8 +1,5 @@
-import Image from "next/image";
-import Link from "next/link";
-
 import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
-import { priceCents } from "@/lib/env";
+import { packPriceCents, priceCents } from "@/lib/env";
 import { bannerForDate, formatPrice } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -69,9 +66,12 @@ const FAQS = [
 export default function HomePage() {
   const banner = bannerForDate(new Date());
   const price = formatPrice(priceCents());
+  const packPrice = formatPrice(packPriceCents());
 
   return (
     <div className="flex min-h-dvh flex-col">
+      {/* Hoisted to <head>: the hero image is the most likely LCP element. */}
+      <link rel="preload" as="image" href="/examples/vampire-after.jpg" />
       {banner ? (
         <p
           className={`border-b px-4 py-2 text-center text-sm font-medium ${
@@ -99,9 +99,9 @@ export default function HomePage() {
               straight to your phone.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <Link href="/create" className="btn-primary">
+              <a href="/create" className="btn-primary">
                 Haunt my photo
-              </Link>
+              </a>
               <span className="text-sm text-bone/60">
                 Under 90 seconds on a phone. No account needed.
               </span>
@@ -115,12 +115,14 @@ export default function HomePage() {
 
           <figure className="haunt-in relative rounded-[2rem] border border-white/10 bg-night/80 p-4 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.9)]">
             <div className="relative overflow-hidden rounded-[1.4rem]">
-              <Image
+              {/* Plain img keeps the static landing free of image-component hydration. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
                 src="/examples/vampire-after.jpg"
                 alt="Placeholder example of a haunted portrait in the vampire style"
                 width={600}
                 height={600}
-                priority
+                fetchPriority="high"
                 sizes="(max-width: 1024px) 90vw, 480px"
                 className="aspect-square w-full object-cover"
               />
@@ -154,11 +156,13 @@ export default function HomePage() {
               >
                 <div className="grid grid-cols-2 gap-2">
                   <div className="relative overflow-hidden rounded-xl border border-white/10">
-                    <Image
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
                       src={example.before}
                       alt={example.alt.replace("before and after", "before")}
                       width={400}
                       height={400}
+                      loading="lazy"
                       sizes="(max-width: 640px) 42vw, 200px"
                       className="aspect-square w-full object-cover"
                     />
@@ -167,11 +171,13 @@ export default function HomePage() {
                     </span>
                   </div>
                   <div className="relative overflow-hidden rounded-xl border border-ember/30">
-                    <Image
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
                       src={example.after}
                       alt={example.alt.replace("before and after", "after")}
                       width={400}
                       height={400}
+                      loading="lazy"
                       sizes="(max-width: 640px) 42vw, 200px"
                       className="aspect-square w-full object-cover"
                     />
@@ -208,28 +214,41 @@ export default function HomePage() {
 
         <section id="pricing" aria-labelledby="pricing-heading" className="container-page py-16">
           <h2 id="pricing-heading" className="font-display text-3xl sm:text-4xl">
-            One portrait, one price
+            Two ways to haunt your photo
           </h2>
-          <div className="mt-8 grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
-            <p className="text-6xl font-semibold text-pumpkin">{price}</p>
-            <div>
-              <ul className="grid gap-3 text-base text-bone/80 sm:grid-cols-2">
-                <li>Five Halloween styles</li>
+          <div className="mt-8 grid gap-6 md:grid-cols-2">
+            <article className="rounded-3xl border border-white/10 bg-night/60 p-6">
+              <h3 className="font-display text-2xl">Single portrait</h3>
+              <p className="mt-2 text-5xl font-semibold text-pumpkin">{price}</p>
+              <p className="mt-3 text-sm text-bone/70">
+                One style, one full-resolution download.
+              </p>
+              <ul className="mt-5 space-y-2 text-sm text-bone/75">
                 <li>Watermarked preview free</li>
-                <li>Full-resolution JPEG download</li>
+                <li>Five Halloween styles to choose from</li>
                 <li>Payment once, no subscription</li>
-                <li>No account or email required</li>
-                <li>7-day refund policy</li>
               </ul>
-              <div className="mt-8 flex flex-wrap items-center gap-4">
-                <Link href="/create" className="btn-primary">
-                  Haunt my photo — {price}
-                </Link>
-                <span className="text-sm text-bone/60">
-                  Charged once. Photos deleted after 48 hours.
-                </span>
-              </div>
-            </div>
+            </article>
+            <article className="rounded-3xl border border-ember/40 bg-ember/5 p-6">
+              <h3 className="font-display text-2xl">Monster Pack</h3>
+              <p className="mt-2 text-5xl font-semibold text-pumpkin">{packPrice}</p>
+              <p className="mt-3 text-sm text-bone/70">
+                The style you pick plus three more — 4 styles, one download each.
+              </p>
+              <ul className="mt-5 space-y-2 text-sm text-bone/75">
+                <li>Your chosen style unlocks immediately</li>
+                <li>Three extra styles generated after payment</li>
+                <li>A before/after image to share</li>
+              </ul>
+            </article>
+          </div>
+          <div className="mt-8 flex flex-wrap items-center gap-4">
+            <a href="/create" className="btn-primary">
+              Haunt my photo — {price}
+            </a>
+            <span className="text-sm text-bone/60">
+              Charged once. Photos deleted after 48 hours.
+            </span>
           </div>
         </section>
 

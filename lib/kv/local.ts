@@ -99,9 +99,13 @@ export class LocalKV implements KV {
   }
 
   async incr(key: string, exSeconds?: number): Promise<number> {
+    return this.incrBy(key, 1, exSeconds);
+  }
+
+  async incrBy(key: string, amount: number, exSeconds?: number): Promise<number> {
     return this.withLock(key, async () => {
       const entry = await this.readEntry(key);
-      const next = (entry ? Number(entry.value) : 0) + 1;
+      const next = (entry ? Number(entry.value) : 0) + amount;
       const expiresAt = entry
         ? entry.expiresAt
         : exSeconds
@@ -113,6 +117,10 @@ export class LocalKV implements KV {
   }
 
   async setAdd(key: string, member: string): Promise<void> {
+    await this.setAddIfAbsent(key, member);
+  }
+
+  async setAddIfAbsent(key: string, member: string): Promise<boolean> {
     const dir = this.setDir(key);
     await mkdir(dir, { recursive: true });
     try {
@@ -120,9 +128,36 @@ export class LocalKV implements KV {
       await writeFile(path.join(dir, encodeURIComponent(member)), "", {
         flag: "wx",
       });
+      return true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw error;
     }
+  }
+
+  async setIfAbsent(
+    key: string,
+    value: string,
+    exSeconds?: number,
+  ): Promise<boolean> {
+    return this.withLock(key, async () => {
+      const entry = await this.readEntry(key);
+      if (entry) return false;
+      await this.writeEntry(key, {
+        value,
+        expiresAt: exSeconds ? Date.now() + exSeconds * 1000 : null,
+      });
+      return true;
+    });
+  }
+
+  async deleteIfValue(key: string, value: string): Promise<void> {
+    await this.withLock(key, async () => {
+      const entry = await this.readEntry(key);
+      if (entry?.value === value) {
+        await rm(this.file(key), { force: true });
+      }
+    });
   }
 
   async setRemove(key: string, member: string): Promise<void> {

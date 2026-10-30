@@ -1,4 +1,7 @@
 {
   "extends": ["next/core-web-vitals", "next/typescript"],
-  "ignorePatterns": ["e2e/**", ".next/**", "node_modules/**"]
+  "ignorePatterns": ["e2e/**", ".next/**", "node_modules/**"],
+  "rules": {
+    "@next/next/no-html-link-for-pages": "off"
+  }
 }

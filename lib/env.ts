@@ -51,6 +51,30 @@ export function priceCents(): number {
   return numberFromEnv("PRICE_SINGLE_CENTS", 499);
 }
 
+export function packPriceCents(): number {
+  return numberFromEnv("PRICE_PACK_CENTS", 899);
+}
+
+export function generationCostCents(): number {
+  return numberFromEnv("GENERATION_COST_CENTS", 4);
+}
+
+export function adminPassword(): string {
+  return process.env.ADMIN_PASSWORD || "";
+}
+
+export function turnstileSiteKey(): string | undefined {
+  return process.env.TURNSTILE_SITE_KEY || undefined;
+}
+
+export function turnstileSecretKey(): string | undefined {
+  return process.env.TURNSTILE_SECRET_KEY || undefined;
+}
+
+export function turnstileEnforced(): boolean {
+  return process.env.TURNSTILE_ENFORCED === "true";
+}
+
 export function imageProviderName(): string {
   return (process.env.IMAGE_PROVIDER || "mock").toLowerCase();
 }

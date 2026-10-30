@@ -1,13 +1,16 @@
 # Haunted Portrait
 
 A one-page Halloween micro-product: upload a photo, pick a style, see a watermarked
-preview, pay $4.99 once and download the full-resolution portrait. No accounts, no email.
-Photos are deleted after 48 hours.
+preview, then buy a **single portrait ($4.99)** or the **Monster Pack ($8.99, four styles)**
+and download the full-resolution files. No accounts, no email. Photos are deleted after 48
+hours. Paid buyers also get a before/after share image, and the owner gets a password-
+protected daily numbers view.
 
-This repository is increment 1 of the MVP described in
-[`docs/specs/haunted-portrait-mvp.md`](docs/specs/haunted-portrait-mvp.md). It runs end to
-end with **mock** image and payment providers, so no API keys are needed to develop, test
-or demo it.
+This repository implements increments 1 and 2 from
+[`docs/specs/haunted-portrait-mvp.md`](docs/specs/haunted-portrait-mvp.md) and
+[`docs/specs/monster-pack-and-share.md`](docs/specs/monster-pack-and-share.md). It runs end
+to end with **mock** image and payment providers and Turnstile off, so no API keys are
+needed to develop, test or demo it.
 
 ## Requirements
 
@@ -48,16 +51,18 @@ Run the whole gate the way CI does:
 npm run lint && npm run build && npm test && npm run check:secrets && npm run e2e
 ```
 
-### Lighthouse budget (AC-24)
+### Lighthouse budget
 
 Lighthouse is opt-in because it is slow and needs a Chrome binary:
 
 ```bash
 npm run build
-RUN_LIGHTHOUSE=1 npx playwright test e2e/lighthouse.spec.ts
+RUN_LIGHTHOUSE=1 npx playwright test e2e/lighthouse.spec.ts --project=iphone
 ```
 
-It checks the mobile scores (performance ≥ 85, accessibility ≥ 90) on `/`.
+It checks the mobile scores (performance ≥ 85, accessibility ≥ 90) on `/` and `/create`.
+Each page is measured as the **median of three runs**, because Lighthouse is noisy on shared
+machines.
 
 ## Environment variables
 
@@ -67,9 +72,11 @@ Every variable the code reads is listed and commented in
 | Group | Variables |
 | --- | --- |
 | Site | `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_PLAUSIBLE_DOMAIN`, `CONTACT_EMAIL` |
-| Pricing | `PRICE_SINGLE_CENTS`, `PRICE_PACK_CENTS` (documented only in increment 1) |
+| Pricing | `PRICE_SINGLE_CENTS`, `PRICE_PACK_CENTS`, `GENERATION_COST_CENTS` |
 | Image provider | `IMAGE_PROVIDER`, `GEMINI_API_KEY`, `GEMINI_IMAGE_MODEL`, `GEMINI_API_BASE`, `GENERATION_TIMEOUT_MS` |
 | Payments | `PAYMENT_PROVIDER`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_API_BASE` |
+| Turnstile | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `TURNSTILE_ENFORCED` |
+| Admin | `ADMIN_PASSWORD` |
 | Secrets | `DOWNLOAD_SIGNING_SECRET`, `MOCK_WEBHOOK_SECRET`, `CRON_SECRET` |
 | Storage/KV | `STORAGE_DRIVER`, `KV_DRIVER`, `DATA_DIR`, `BLOB_READ_WRITE_TOKEN`, `KV_REST_URL`, `KV_REST_TOKEN` |
 | Limits | `PREVIEW_LIMIT_PER_IP`, `DAILY_GENERATION_CAP`, `RETENTION_HOURS` |
@@ -92,12 +99,26 @@ fall back to obviously-insecure values so a fresh clone works.
   and verifies `stripe-signature`.
 - **`lib/jobs.ts` / `lib/job-service.ts`** hold the one-way job state machine
   (`created → generating → preview_ready | failed`, `preview_ready → awaiting_payment →
-  paid → unlocked`, any → `expired`) and lazy retention.
+  paid → unlocked`, any → `expired`), lazy retention and the asset model. Increment 1 jobs
+  are normalised into a single asset on read.
+- **`lib/assets.ts` / `lib/expand.ts`** own the pack assets: the chosen style is ready from
+  the preview, the other three start `pending` and are generated **only after payment**.
+  `claimPendingAsset` uses an atomic KV set membership, and a short per-job edit lock makes
+  concurrent updates safe; the success page and the cron sweeper share the same path.
+- **`lib/products.ts`** derives both prices from env and the pack composition as a pure
+  function of the chosen style (chosen first + three distinct defaults).
+- **`lib/share.ts`** builds the before/after JPEG composite (equal heights, long edge
+  ≤ 1600 px, < 3 MB) for a signed share URL.
+- **`lib/captcha.ts`** exposes mock and Turnstile verifiers. Enforcement is off unless
+  `TURNSTILE_ENFORCED=true` **and** both keys exist; verification runs before any quota is
+  consumed.
+- **`lib/stats.ts` / `lib/admin.ts`** write day counters where events happen and render the
+  aggregate-only admin view behind a signed, HttpOnly cookie.
 - **`lib/images.ts`** strips EXIF/GPS, resizes and builds the 512 px watermarked preview.
-  The full-resolution file is a **separate private object**; only `/api/download` reads it,
-  after the job is paid, with a 15-minute HMAC token.
+  Full-resolution files are **separate private objects**; only `/api/download` and
+  `/api/assets` read them, after the job is paid, with signed 15-minute tokens.
 - **`lib/limits.ts`** enforces the rolling 24 h per-IP preview allowance and the global
-  daily generation cap through the KV adapter.
+  daily generation cap through the KV adapter (atomic in both drivers).
 - **`lib/storage`**, **`lib/kv`** are small interfaces with disk drivers for dev/tests and
   Vercel Blob / Upstash Redis drivers for production.
 
@@ -105,18 +126,75 @@ fall back to obviously-insecure values so a fresh clone works.
 
 | Route | Purpose |
 | --- | --- |
-| `/` | Landing page (server-rendered date banner, pricing, FAQ, meta) |
-| `/create` | Upload, style picker, consent, free preview, paywall |
-| `/success?session_id=` | Polls job status, shows the HD download and expiry time |
+| `/` | Landing page (server-rendered date banner, both products, FAQ, meta) |
+| `/create` | Upload, style picker, consent, free preview, single + pack paywall |
+| `/success?session_id=` | Polls job status, expands pack cards, shows downloads and share image |
+| `/admin` | Password-protected daily aggregates (no photos, no job ids) |
 | `/privacy`, `/terms` | Legal pages |
 | `/checkout/mock?session=` | Mock hosted checkout (only when `PAYMENT_PROVIDER=mock`) |
-| `POST /api/generate` | Validate, strip metadata, generate, store private objects, return preview URL |
-| `GET /api/jobs/[id]` | Public job status; download URL only for the owning **paid** session |
+| `POST /api/generate` | Validate, Turnstile, strip metadata, generate, store private objects |
+| `GET /api/jobs/[id]` | Public job status with `assets[]`; URLs only for the owning paid session |
+| `POST /api/jobs/[id]/expand?session=` | Claims and generates **one** pending pack asset |
+| `GET /api/assets/[jobId]/[styleId]?session=` | Inline full-res asset for a paid owner |
 | `GET /api/preview/[id]` | Streams the watermarked preview only |
-| `POST /api/checkout` | Creates a payment session with `job_id` metadata |
-| `POST /api/webhooks/payments` | Signature-verified, idempotent webhook |
-| `GET /api/download?token=` | Streams the full-resolution file for a paid job |
-| `GET /api/cron/cleanup` | Bearer `CRON_SECRET`; purges expired jobs |
+| `POST /api/checkout` | `{ jobId, product }`; price/product come from env and the session record |
+| `POST /api/webhooks/payments` | Signature-verified, idempotent webhook that marks the paid product |
+| `GET /api/download?token=` | Streams one full-resolution asset (signed, per style) |
+| `GET /api/share?token=` | Streams the before/after JPEG for a paid job |
+| `GET /api/cron/cleanup` | Bearer `CRON_SECRET`; purges expired jobs and every asset |
+| `GET /api/cron/expand-packs` | Bearer `CRON_SECRET`; finishes packs left by a closed tab |
+| `POST /api/admin/login`, `POST /api/admin/logout` | Password login and logout |
+
+## Monster Pack flow
+
+1. Preview generation stores the chosen style as a `ready` asset and records the preview.
+2. Checkout with `product: "pack"` reserves four assets (chosen + three `pending`) and stores
+   the product on the **session record**. The job does not record a paid product yet.
+3. The webhook reads the product/amount from that session record (never the request body),
+   marks the job paid, sets `product`, `paidAmountCents` and unlocks the chosen asset. The
+   event id is claimed atomically (SET NX) before any side effect, so simultaneous duplicate
+   deliveries record exactly one sale.
+4. `/success` calls `POST /api/jobs/[id]/expand` once per pending card, showing per-card
+   loading/failed/retry states. Each call atomically claims **one** style with a TTL of
+   `2 × GENERATION_TIMEOUT_MS + 30 s`, so the client and the cron can never generate the same
+   style twice; a crashed claim or a `generating` asset older than one timeout is reclaimed.
+5. `GET /api/cron/expand-packs` does the same for paid packs older than 60 s, for visitors who
+   close the tab. It is bounded to three assets per run and declares `maxDuration = 420`, which
+   fits three full generation budgets plus overhead. If your plan caps function duration below
+   420 s, lower `GENERATION_TIMEOUT_MS` (three assets × two attempts must fit) or reduce
+   `MAX_EXPANSIONS_PER_RUN`; a killed run is recoverable through the claim TTL.
+
+A single purchase keeps exactly one asset. Failed extra styles show a retry action that
+regenerates only that style; other cards stay downloadable and no preview quota or payment
+is consumed again.
+
+## Share image
+
+Paid jobs expose a signed `/api/share?token=` URL for the chosen style. The composite places
+the original photo and the chosen portrait side by side at equal height (no stretching or
+letterboxing), adds a footer band with the site host, caps the long edge at 1600 px and
+compresses under 3 MB. The share button emits `share_image_downloaded` on each click and the
+file is named `haunted-portrait-before-after.jpg`.
+
+## Turnstile
+
+- Off by default: with no keys (or `TURNSTILE_ENFORCED=false`) the widget is not rendered and
+  the verifier is a no-op, so local development, tests and e2e need no Cloudflare account.
+- To enable, set `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` and `TURNSTILE_ENFORCED=true`.
+  Use Cloudflare's published **test keys** in development.
+- Verification has a 5 s timeout, runs before the preview quota/daily cap and before any
+  provider call. A rejection is `400 captcha_failed`; a timeout is a retryable
+  `503 captcha_timeout`. Neither consumes quota. Secrets and tokens are never logged or
+  returned.
+
+## Admin
+
+`/admin` fails closed without `ADMIN_PASSWORD`. The login route compares in constant time,
+limits each IP to five attempts per minute, and sets an HttpOnly `SameSite=Lax` cookie signed
+under a distinct admin context that lasts 8 hours. The signed-in page shows today's UTC
+previews, single/pack sales, revenue, estimated generation cost
+(`GENERATIONS × GENERATION_COST_CENTS`) and margin, plus yesterday's revenue. It renders no
+job ids, photos, storage keys or customer data.
 
 ## Storage and KV drivers
 
@@ -155,14 +233,17 @@ confirm test-mode checkout and webhook signatures before taking real payments.
 
 1. Import the repository and set the env vars from `.env.example` in Project Settings.
    At minimum: `NEXT_PUBLIC_SITE_URL`, `CONTACT_EMAIL`, `PRICE_SINGLE_CENTS`,
-   `IMAGE_PROVIDER`, `PAYMENT_PROVIDER`, the three secrets, `STORAGE_DRIVER=vercel-blob`,
+   `PRICE_PACK_CENTS`, `GENERATION_COST_CENTS`, `IMAGE_PROVIDER`, `PAYMENT_PROVIDER`,
+   `ADMIN_PASSWORD`, the three secrets, `STORAGE_DRIVER=vercel-blob`,
    `KV_DRIVER=upstash`, `BLOB_READ_WRITE_TOKEN`, `KV_REST_URL`, `KV_REST_TOKEN`.
+   Set the Turnstile variables only when you enable the check.
 2. Attach a Vercel Blob store and an Upstash Redis database; copy their tokens.
-3. `vercel.json` registers the hourly cleanup cron (`/api/cron/cleanup`). Vercel sends
-   `Authorization: Bearer <CRON_SECRET>`; the route also works from a manual call with the
+3. `vercel.json` registers two crons: hourly `/api/cron/cleanup` and every-five-minutes
+   `/api/cron/expand-packs` (paid packs left by a closed tab). Vercel sends
+   `Authorization: Bearer <CRON_SECRET>`; both routes also work from a manual call with the
    same header.
 4. Set `NEXT_PUBLIC_SITE_URL` to the real domain: it feeds canonical/OG tags and the
-   preview watermark host.
+   preview/share watermark host.
 5. Replace `public/examples/*` and `public/og.png` with the owner's real assets before
    launch (the current files are generated placeholders).
 
@@ -173,9 +254,11 @@ confirm test-mode checkout and webhook signatures before taking real payments.
 allows `'unsafe-eval'` because `heic2any`'s Emscripten worker evaluates strings with
 `new Function`; `'wasm-unsafe-eval'` alone is not enough and production HEIC uploads would
 fail. The trade-off is deliberate for this one-page product: script origins are still
-limited to `self` and Plausible, and the app never renders user HTML. The HEIC path also
-decodes natively first (Safari), gives the WASM decoder a 20 s timeout, and falls back to
-the "export as JPG" message, so a blocked or broken decoder can never hang the form.
+limited to `self`, Plausible and Cloudflare Turnstile, and the app never renders user HTML.
+The HEIC path also decodes natively first (Safari), gives the WASM decoder a 20 s timeout,
+and falls back to the "export as JPG" message, so a blocked or broken decoder can never hang
+the form. Critical CSS is inlined at build time (`experimental.inlineCss`) to keep the
+mobile LCP fast.
 
 ## Retention and privacy
 
@@ -192,11 +275,18 @@ the "export as JPG" message, so a blocked or broken decoder can never hang the f
   with the real provider.
 - The mock checkout charges nothing and is labelled **Test mode**; Payment and webhook
   semantics mirror Stripe but are not Stripe.
+- The Monster Pack is demonstrated with three extra mock colour grades. The composition,
+  claim, retry and download behaviour is real; only the artwork is placeholder.
 - HEIC conversion is best effort in the browser (`heic2any`); if the browser cannot decode
   it the user is told to export a JPG. iOS camera capture normally yields JPEG.
 - Landing examples and the OG image are generated placeholders and must be replaced by the
   owner before launch. They are not customer results.
-- Lighthouse runs only when explicitly requested (`RUN_LIGHTHOUSE=1`).
+- Turnstile is off by default. The verifier is implemented and tested with mocks, but the
+  Cloudflare widget itself is only exercised when real/test keys are configured.
+- The admin view is an aggregate convenience, not accounting: it counts generation
+  *attempts* at `GENERATION_COST_CENTS` each and has no per-order data.
+- Lighthouse runs only when explicitly requested (`RUN_LIGHTHOUSE=1`), as the median of
+  three runs on `/` and `/create`.
 
 ### Known deviation: synchronous generation (FR-12, issue #5)
 
@@ -222,6 +312,9 @@ overwrite or append a trusted client IP; otherwise the per-IP preview limit can 
 - [ ] Real Gemini key + `IMAGE_PROVIDER=gemini` verified.
 - [ ] Real Stripe key + webhook verified end to end (test mode first).
 - [ ] `NEXT_PUBLIC_SITE_URL` set to the live domain.
+- [ ] `PRICE_SINGLE_CENTS`, `PRICE_PACK_CENTS` and `GENERATION_COST_CENTS` confirmed.
+- [ ] `ADMIN_PASSWORD` set to a strong value (admin fails closed without it).
+- [ ] Turnstile keys + `TURNSTILE_ENFORCED=true` when traffic warrants it; remove test keys.
 - [ ] Landing examples and OG image replaced with licensed assets.
 - [ ] Privacy/terms reviewed for the live jurisdictions.
 - [ ] `CRON_SECRET`, `DOWNLOAD_SIGNING_SECRET`, `MOCK_WEBHOOK_SECRET` rotated to real values.

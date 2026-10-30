@@ -30,6 +30,8 @@ const secretNames = [
   "CRON_SECRET",
   "BLOB_READ_WRITE_TOKEN",
   "KV_REST_TOKEN",
+  "TURNSTILE_SECRET_KEY",
+  "ADMIN_PASSWORD",
 ];
 
 const values = secretNames

@@ -34,6 +34,10 @@ export interface RunGenerationOptions {
   timeoutMs?: number;
   /** Total attempts, including the first one. */
   attempts?: number;
+  /** Called before every provider attempt (used for cost stats). */
+  onAttempt?: () => void | Promise<void>;
+  /** Pack extras retry once even for non-transient errors (FR-10). */
+  retryAll?: boolean;
 }
 
 /**
@@ -49,6 +53,13 @@ export async function runGeneration(
   let lastError: GenerateError = "fatal";
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (options.onAttempt) {
+      try {
+        await options.onAttempt();
+      } catch {
+        // Stats must never break a generation.
+      }
+    }
     let result: ImageProviderResult;
     try {
       result = await withTimeout(options.provider.generatePortrait(input), timeoutMs);
@@ -58,7 +69,7 @@ export async function runGeneration(
 
     if ("fullRes" in result) return result;
     lastError = result.error;
-    if (!isRetryable(lastError)) return result;
+    if (!options.retryAll && !isRetryable(lastError)) return result;
   }
 
   return { error: lastError };

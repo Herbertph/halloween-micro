@@ -39,7 +39,11 @@ export default async function MockCheckoutPage({
 
         <h1 className="mt-6 text-sm font-medium text-bone/70">Order summary</h1>
         <div className="mt-2 flex items-baseline justify-between border-b hairline pb-4">
-          <span className="text-base text-bone">Full-resolution portrait</span>
+          <span className="text-base text-bone">
+            {session.product === "pack"
+              ? "Monster Pack — 4 styles"
+              : "Full-resolution portrait"}
+          </span>
           <span className="text-2xl font-semibold text-bone">
             {formatPrice(session.amountCents)}
           </span>

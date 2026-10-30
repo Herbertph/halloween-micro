@@ -1,31 +1,29 @@
-import Link from "next/link";
-
 import { contactEmail } from "@/lib/env";
 
 export function SiteHeader() {
   return (
     <header className="border-b hairline">
       <div className="container-page flex h-16 items-center justify-between">
-        <Link
+        <a
           href="/"
           className="font-display text-xl tracking-wide text-bone"
           aria-label="Haunted Portrait home"
         >
           Haunted Portrait
-        </Link>
+        </a>
         <nav aria-label="Main" className="flex items-center gap-5 text-sm">
-          <Link href="/#how-it-works" className="hidden text-bone/80 hover:text-pumpkin sm:inline">
+          <a href="/#how-it-works" className="hidden text-bone/80 hover:text-pumpkin sm:inline">
             How it works
-          </Link>
-          <Link href="/#pricing" className="hidden text-bone/80 hover:text-pumpkin sm:inline">
+          </a>
+          <a href="/#pricing" className="hidden text-bone/80 hover:text-pumpkin sm:inline">
             Pricing
-          </Link>
-          <Link
+          </a>
+          <a
             href="/create"
             className="rounded-full border border-ember/60 px-4 py-2 font-medium text-pumpkin hover:bg-ember/10"
           >
             Start
-          </Link>
+          </a>
         </nav>
       </div>
     </header>
@@ -56,12 +54,12 @@ export function SiteFooter() {
             refund you.
           </p>
           <div className="flex gap-4 sm:justify-end">
-            <Link className="link" href="/privacy">
+            <a className="link" href="/privacy">
               Privacy
-            </Link>
-            <Link className="link" href="/terms">
+            </a>
+            <a className="link" href="/terms">
               Terms
-            </Link>
+            </a>
           </div>
           <p className="text-xs text-bone/50">
             &copy; {new Date().getUTCFullYear()} Haunted Portrait. Placeholder examples

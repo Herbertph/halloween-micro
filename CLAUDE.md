@@ -30,26 +30,36 @@ Built with a multi-agent pipeline: requirements analyst → developer → tester
 | `npm run fixtures` | Regenerate test fixtures. |
 
 Full gate: `npm run lint && npm run build && npm test && npm run check:secrets && npm run e2e`.
-Lighthouse budget (opt-in): `RUN_LIGHTHOUSE=1 npx playwright test e2e/lighthouse.spec.ts`.
+Lighthouse budget (opt-in, median of 3): `RUN_LIGHTHOUSE=1 npx playwright test e2e/lighthouse.spec.ts --project=iphone`.
 
 ## Structure
 
 ```
-app/                    routes: /, /create, /success, /privacy, /terms,
+app/                    routes: /, /create, /success, /privacy, /terms, /admin,
                         /checkout/mock, /api/generate, /api/jobs/[id],
-                        /api/preview/[id], /api/checkout,
-                        /api/webhooks/payments, /api/download, /api/cron/cleanup
-components/             landing chrome, upload/paywall form, success poller
+                        /api/jobs/[id]/expand, /api/assets/[jobId]/[styleId],
+                        /api/preview/[id], /api/checkout, /api/webhooks/payments,
+                        /api/download, /api/share, /api/cron/cleanup,
+                        /api/cron/expand-packs, /api/admin/login|logout
+components/             landing chrome, upload/paywall form, success asset cards,
+                        admin login
 config/styles.ts        style ids, names, descriptions, prompts (server only)
+lib/products.ts         product ids, env prices, pure pack composition
+lib/assets.ts           asset normalisation (increment 1 jobs included)
+lib/expand.ts           atomic claim + one-asset expansion, cron sweeper
 lib/providers/          image (mock, gemini) and payments (mock, stripe) adapters
 lib/storage/            storage interface + local disk and Vercel Blob drivers
-lib/kv/                 kv interface + local disk and Upstash drivers
+lib/kv/                 kv interface + local disk and Upstash drivers (atomic ops)
 lib/jobs.ts             pure job state machine, transitions, expiry
 lib/job-service.ts      persistence, lazy retention, cleanup, public job view
 lib/images.ts           EXIF strip, resize, watermark, featureless detection
-lib/generation.ts       timeout + one-retry generation boundary
+lib/share.ts            before/after composite layout + rendering
+lib/captcha.ts          mock/Turnstile verifiers, enforced only when configured
+lib/stats.ts            UTC day counters (previews, generations, sales, revenue)
+lib/admin.ts            password check, signed cookie, login rate limit
+lib/generation.ts       timeout + retry generation boundary
 lib/limits.ts           per-IP rolling window and global daily cap
-lib/tokens.ts           HMAC download tokens (15 minutes)
+lib/tokens.ts           HMAC download (per asset) and share tokens
 lib/analytics.ts        Plausible events (no-op when unset)
 lib/client/image.ts     browser validation, HEIC conversion, 1536 px resize
 tests/                  unit, route, component tests and fixtures
@@ -74,15 +84,20 @@ scripts/                asset/fixture generators and the bundle secret scan
 
 ## Project rules
 
-- **Counters and indexes use atomic KV operations.** Never read-modify-write the per-IP
-  window, the daily cap or `jobs:index` from application code: `lib/kv` exposes
-  `addToRollingWindow`, `incr`, and atomic set add/remove for exactly this reason.
+- **Money comes from the server.** The client only names `product` (`single`/`pack`); the price is read from env and the product/amount are stored on the session record. The job records its paid product only in the webhook.
+- **Pack extras are post-payment only.** Never generate, preview or store a pending style before the verified webhook. Each style claim is an atomic KV key with a TTL (`2 × GENERATION_TIMEOUT_MS + 30 s`); the success page and cron must share that path, `generating` assets older than one timeout are reclaimable, and the chosen style is never regenerated.
+- **Webhook idempotency is an atomic claim.** The event id is stored with SET NX before any side effect and released only if processing throws, so simultaneous deliveries record one sale.
+- **Download and share tokens use separate HMAC contexts.** Download tokens are bound to job + style + expiry; share tokens are signed under a distinct context and only issued to paid sessions.
+- **Turnstile secrets stay server-side.** `TURNSTILE_SITE_KEY` may be passed as a prop, but the secret is never logged, returned or bundled. Enforcement is off unless the flag and both keys are set, and verification happens before quota is consumed.
+- **Admin is aggregate-only.** No job ids, photos, storage keys or per-customer data in `/admin`; the cookie is HttpOnly, SameSite=Lax, signed under the admin context and lasts 8 h.
+- **Counters and indexes use atomic KV operations.** Never read-modify-write the per-IP window, the daily cap, the cleanup index or an asset claim: `lib/kv` exposes atomic primitives for exactly this reason.
 - **Secrets stay server-side.** Only `NEXT_PUBLIC_*` variables may reach the browser. `config/styles.ts` and `lib/env.ts` are server-only; prompts are never serialised, logged or returned.
-- **The full-resolution object never leaks.** It has a random private key, is read only by `/api/download`, and that route requires a paid job plus a valid 15-minute HMAC token. Keep preview and full-res as separate objects.
+- **The full-resolution object never leaks.** Every asset has a random private key, is read only by `/api/download` or the paid-owner `/api/assets` route, and the preview is a separate watermarked object.
 - **Every `process.env` read must be listed in `.env.example`.** `tests/unit/env.test.ts` enforces it.
 - **Job transitions are one-way** and validated in `lib/jobs.ts`. Do not write statuses directly.
 - **Tests own their ports and data.** Unit tests use a per-file temp `DATA_DIR`; Playwright serves on `E2E_PORT` (default 3101) and never touches 4545.
-- **The CSP allows `'unsafe-eval'` on purpose.** `heic2any`'s WASM worker needs it; keep script origins locked to self + Plausible. The HEIC path has a timeout and a fallback message, so never make the decoder mandatory for the flow.
+- **The CSP allows `'unsafe-eval'` on purpose.** `heic2any`'s WASM worker needs it; keep script origins locked to self + Plausible + Turnstile. The HEIC path has a timeout and a fallback message, so never make the decoder mandatory for the flow.
+- **Marketing pages use plain anchors and images.** `/` and the shared chrome intentionally do full-page navigation to keep the static page free of router/image hydration; `@next/next/no-html-link-for-pages` is off for that reason. `experimental.inlineCss` keeps the mobile LCP fast.
 - **Controllers stay thin.** Validation lives in `lib/api.ts`, orchestration in `lib/*-service` or route handlers, pure logic in `lib/`.
 - **Mock providers are the default** so the flow is demoable offline. Stripe/Gemini ship wired but unverified; do not exercise them in CI.
 

@@ -1,7 +1,11 @@
 # Spec: Go-live hardening (increment 3)
 
 - **Branch:** `feature/go-live-hardening`
-- **Status:** ready for development
+- **Status:** implemented in this branch; QA verdict PASS (see `docs/test-reports/go-live-hardening.md`).
+  Amended after QA: demo mode requires a mock payment provider (FR-1/FR-3), the Gemini probe
+  must receive an image part (FR-4/FR-5), the Upstash request timeout (FR-8), which routes map
+  `StorageError` (FR-7), `NEXT_PUBLIC_SITE_URL` readiness (FR-2), the flag-with-real-provider
+  combination (G3-AC-3/4) and the `STRIPE_PRICE_*` note (FR-4).
 - **Builds on:** increments 1 (#8) and 2 (#13), both merged
 - **Why now:** the code sells a product it cannot yet produce. Every provider is a mock, and
   the moment the repository is deployed to production with the current defaults, a visitor
@@ -51,20 +55,28 @@ This increment closes both gaps without needing keys, plus three hardening items
 - **FR-1** — `lib/config-check.ts` exposes `assertProductionConfig()`: in production (as
   reported by the runtime, not by an env var the client can set) it refuses to operate when
   `PAYMENT_PROVIDER=mock`, `IMAGE_PROVIDER=mock`, `STORAGE_DRIVER=local` or
-  `KV_DRIVER=local`, unless `ALLOW_MOCK_PROVIDERS=true` is set for a deliberate demo deploy.
-  Refusal means: `/api/generate` and `/api/checkout` answer 503 `misconfigured`, and the
-  reason is logged once at start-up.
+  `KV_DRIVER=local`, unless `ALLOW_MOCK_PROVIDERS=true` **and** `PAYMENT_PROVIDER=mock` are
+  both set for a deliberate demo deploy. With a real payment provider the flag changes
+  nothing: mock image and local drivers stay refused. Refusal means `/api/generate` and
+  `/api/checkout` answer 503 `misconfigured`, and the reason is logged once at start-up.
 - **FR-2** — `GET /api/health` returns 200 with `{ ready: true, mode: "live" | "demo" }` when
   the configuration is acceptable, and 503 with `{ ready: false, problems: string[] }` when it
   is not. It lists driver names and missing variable names only — never values, never secrets.
-- **FR-3** — When running as a demo (`ALLOW_MOCK_PROVIDERS=true` with mock providers) the site
-  shows a small, unmistakable "Demo — no real payment" label in the header, on the paywall and
-  on the success page, so a link can never be mistaken for a shop that charges.
+  `NEXT_PUBLIC_SITE_URL` is **not** part of readiness in this increment (it is checked by the
+  launch checklist); making it a required production variable is backlog.
+- **FR-3** — When running as a demo (`ALLOW_MOCK_PROVIDERS=true` **and**
+  `PAYMENT_PROVIDER=mock`) the site shows a small, unmistakable "Demo — no real payment" label
+  in the header, on the paywall and on the success page, so a link can never be mistaken for a
+  shop that charges. The label is production-only and never appears on a live deployment.
 - **FR-4** — `npm run verify:providers` checks, per service, only what is configured:
-  Gemini (one short image call with a fixed tiny prompt), Stripe (create and expire a test
-  Checkout Session with the configured price id), Vercel Blob (write, read, delete a probe
-  object), Upstash (set, get, delete a probe key) and Turnstile (siteverify with a dummy
-  token). Each line prints `PASS`, `FAIL` or `SKIP (not configured)` with a one-line reason.
+  Gemini (one short image call with a fixed tiny prompt, **which must return a non-empty
+  inline image part** — a 200 with text only, no candidate or a blocked response is a FAIL),
+  Stripe (create and expire a test Checkout Session with the configured price id), Vercel Blob
+  (write, read, delete a probe object), Upstash (set, get, delete a probe key) and Turnstile
+  (siteverify with a dummy token). Each line prints `PASS`, `FAIL` or `SKIP (not configured)`
+  with a one-line reason. The Stripe price ids are used by the verifier only: the app's
+  Checkout builds inline `price_data` from `PRICE_*_CENTS`, which is why changing the price
+  needs no Stripe dashboard step. Switching Checkout to the configured price ids is backlog.
 - **FR-5** — The verifier never prints a key, token or secret, including in error messages,
   stack traces or the `--verbose` output; it exits non-zero if any configured service fails
   and zero when everything configured passes (skips are not failures).
@@ -73,11 +85,16 @@ This increment closes both gaps without needing keys, plus three hardening items
   only, calls nothing, and still redacts.
 - **FR-7** — The Blob driver is covered by integration tests against a local stub server:
   `put` sends the expected path, method, headers and body; `get` returns the bytes; `delete`
-  is issued; a 4xx becomes a typed error that the caller surfaces as a retryable user error;
-  a hanging request times out instead of blocking a function.
+  is issued; a 4xx becomes a typed error; a hanging request times out instead of blocking a
+  function. `/api/generate` maps that typed error to a friendly 503; the other routes
+  (`/api/preview`, `/api/download`, `/api/share`, `/api/jobs/:id/expand`) still answer an
+  untyped 500 on a storage failure — documented backlog, not a blocker.
 - **FR-8** — The Upstash driver is covered the same way for `get`, `set` (with TTL), `incr`,
   set add/members/remove and the atomic conditional-delete used by pack claims, including the
-  case where the conditional delete loses the race and must not remove a newer claim.
+  case where the conditional delete loses the race and must not remove a newer claim. Every
+  request is bounded by a configurable timeout (default 10 s) and surfaces a typed `KVError`
+  (timeout, network, HTTP) instead of hanging. Route-level mapping of `KVError` to 503 is
+  backlog, like the Blob case above.
 - **FR-9** — Recording a sale is idempotent per payment session: replaying the webhook or a
   retry after a partial failure counts the revenue once. The admin numbers must not drift.
 - **FR-10** — The admin session cookie sets `Secure` when the configured site URL is HTTPS,
@@ -100,12 +117,14 @@ offline with the mock providers and the stub servers.
 - **G3-AC-2** — Given production with `IMAGE_PROVIDER=mock` or a `local` storage/KV driver,
   when `/api/generate` is called, then it answers 503 `misconfigured` and nothing is written
   to storage.
-- **G3-AC-3** — Given production with `ALLOW_MOCK_PROVIDERS=true` and mock providers, when
-  the pages render, then generation and checkout work and the "Demo — no real payment" label
-  appears in the header, on the paywall and on the success page.
+- **G3-AC-3** — Given production with `ALLOW_MOCK_PROVIDERS=true` **and**
+  `PAYMENT_PROVIDER=mock`, when the pages render, then generation and checkout work and the
+  "Demo — no real payment" label appears in the header, on the paywall and on the success page.
+  Given the same flag with a real payment provider, the label never appears, `mode` is `live`,
+  and mock image or local drivers are still refused.
 - **G3-AC-4** — Given production with real providers and real drivers configured (fake but
-  well-formed values, no network), then `/api/health` returns 200 `{ ready: true,
-  mode: "live" }` and never echoes a key.
+  well-formed values, no network) and any value of `ALLOW_MOCK_PROVIDERS`, then `/api/health`
+  returns 200 `{ ready: true, mode: "live" }` and never echoes a key.
 - **G3-AC-5** — Given a missing required variable in production, `/api/health` returns 503 and
   names the missing variable, without printing any other value.
 - **G3-AC-6** — The verifier with nothing configured exits 0, prints `SKIP` for every
@@ -200,6 +219,24 @@ npm run verify:providers          # manual, needs keys; --dry-run validates shap
    Verify: G3-AC-12, G3-AC-13.
 8. **Docs and quality pass** — README, launch checklist cross-links, `.env.example`, full
    regression, Lighthouse/a11y, secret scan. Verify: G3-AC-14, G3-AC-15.
+
+### Residual hardening (not blockers)
+
+- Only `/api/generate` maps `StorageError` to 503; `/api/preview`, `/api/download`,
+  `/api/share` and `/api/jobs/:id/expand` still answer an untyped 500 on a storage failure, and
+  no route maps `KVError`. Fine for launch, backlog for the next pass.
+- `NEXT_PUBLIC_SITE_URL` is not a readiness requirement, so health can be green while the
+  watermark, canonical URLs and the `Secure` cookie fall back to localhost. The launch
+  checklist is the guard; making it required is backlog.
+- The demo badge is production-only by design; in development with the flag the mode can read
+  `demo` while the badge is absent.
+- The Upstash stub does not exercise `setIfAbsent` (webhook claim) or the rolling-window
+  script; the local driver covers those semantics.
+- Lighthouse covers `/` and `/create` only; `/success` is axe-covered.
+- The `Secure` cookie rule is unit-tested; the e2e server is plain HTTP.
+- Checkout uses inline `price_data`; the Stripe price ids are verifier-only. Switching to
+  price ids is backlog and would require a dashboard step per price change.
+- #5 (synchronous preview generation) is unchanged by this increment.
 
 ### Risks
 

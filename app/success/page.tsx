@@ -1,6 +1,8 @@
+import { DemoBadge } from "@/components/DemoBadge";
 import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
 import { SuccessPoller } from "@/components/success/SuccessPoller";
 import { publicStyles } from "@/config/styles";
+import { isDemoMode } from "@/lib/demo";
 import { loadJob } from "@/lib/job-service";
 import { getSession } from "@/lib/sessions";
 
@@ -28,6 +30,7 @@ export default async function SuccessPage({
     <div className="flex min-h-dvh flex-col">
       <SiteHeader />
       <main className="container-page flex-1 py-12 sm:py-16">
+        {isDemoMode() ? <DemoBadge className="mb-4" /> : null}
         <SuccessPoller
           sessionId={session?.id}
           jobId={job && job.status !== "expired" ? job.id : undefined}

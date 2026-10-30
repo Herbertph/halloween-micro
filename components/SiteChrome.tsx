@@ -1,16 +1,22 @@
+import { DemoBadge } from "@/components/DemoBadge";
 import { contactEmail } from "@/lib/env";
+import { isDemoMode } from "@/lib/demo";
 
 export function SiteHeader() {
+  const demo = isDemoMode();
   return (
     <header className="border-b hairline">
-      <div className="container-page flex h-16 items-center justify-between">
-        <a
-          href="/"
-          className="font-display text-xl tracking-wide text-bone"
-          aria-label="Haunted Portrait home"
-        >
-          Haunted Portrait
-        </a>
+      <div className="container-page flex min-h-16 flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2">
+        <div className="flex items-center gap-3">
+          <a
+            href="/"
+            className="font-display text-xl tracking-wide text-bone"
+            aria-label="Haunted Portrait home"
+          >
+            Haunted Portrait
+          </a>
+          {demo ? <DemoBadge /> : null}
+        </div>
         <nav aria-label="Main" className="flex items-center gap-5 text-sm">
           <a href="/#how-it-works" className="hidden text-bone/80 hover:text-pumpkin sm:inline">
             How it works

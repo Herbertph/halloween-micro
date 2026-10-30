@@ -24,6 +24,7 @@ export default defineConfig({
     env: {
       IMAGE_PROVIDER: "mock",
       PAYMENT_PROVIDER: "mock",
+      ALLOW_MOCK_PROVIDERS: "true",
       STORAGE_DRIVER: "local",
       KV_DRIVER: "local",
       DATA_DIR: ".data/e2e",

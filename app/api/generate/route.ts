@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { siteHost } from "@/lib/env";
 import { ApiError, apiErrorResponse, parseGenerateRequest } from "@/lib/api";
+import { assertProductionConfig } from "@/lib/config-check";
 import { verifyCaptcha } from "@/lib/captcha";
 import { runGeneration } from "@/lib/generation";
 import { detectImageType, makePreview, stripMetadata } from "@/lib/images";
@@ -11,6 +12,7 @@ import { consumeDailyGeneration, consumePreviewAttempt } from "@/lib/limits";
 import { clientIpHash } from "@/lib/request-ip";
 import { incrementGenerations, incrementPreviews } from "@/lib/stats";
 import { getStorage } from "@/lib/storage";
+import { StorageError } from "@/lib/storage/types";
 import { getImageProvider } from "@/lib/providers/image";
 import type { Asset } from "@/lib/types";
 
@@ -22,6 +24,14 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 export async function POST(request: Request): Promise<Response> {
+  const config = assertProductionConfig();
+  if (!config.ready) {
+    return Response.json(
+      { error: "misconfigured", problems: config.problems },
+      { status: 503 },
+    );
+  }
+
   try {
     const ipHash = clientIpHash(request);
 
@@ -127,6 +137,9 @@ export async function POST(request: Request): Promise<Response> {
       { status: 202 },
     );
   } catch (error) {
+    if (error instanceof StorageError) {
+      return Response.json({ error: "storage_unavailable" }, { status: 503 });
+    }
     if (error instanceof ApiError) return apiErrorResponse(error);
     return Response.json({ error: "fatal" }, { status: 500 });
   }

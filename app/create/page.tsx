@@ -2,6 +2,7 @@ import { CreateForm } from "@/components/create/CreateForm";
 import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
 import { publicStyles } from "@/config/styles";
 import { captchaSiteKey } from "@/lib/captcha";
+import { isDemoMode } from "@/lib/demo";
 import { packPriceCents, priceCents } from "@/lib/env";
 import { formatPrice } from "@/lib/format";
 import { loadJob } from "@/lib/job-service";
@@ -37,6 +38,7 @@ export default async function CreatePage({
           priceLabel={formatPrice(priceCents())}
           packPriceLabel={formatPrice(packPriceCents())}
           turnstileSiteKey={captchaSiteKey()}
+          demo={isDemoMode()}
           initialJob={
             usableJob
               ? {

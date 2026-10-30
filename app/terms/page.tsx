@@ -10,6 +10,8 @@ export const metadata: Metadata = {
   alternates: { canonical: "/terms" },
 };
 
+export const dynamic = "force-dynamic";
+
 export default function TermsPage() {
   const email = contactEmail();
   const price = formatPrice(priceCents());

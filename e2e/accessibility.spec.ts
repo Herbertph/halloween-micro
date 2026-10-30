@@ -46,6 +46,26 @@ test("AC-25: keyboard focus is visible on the upload control", async ({ page }) 
   ).toBe(true);
 });
 
+test("AC-28: axe reports no critical violations on /success and /admin", async ({
+  page,
+}) => {
+  for (const route of ["/success?session_id=cs_forged", "/admin"]) {
+    await page.goto(route);
+    const results = await new AxeBuilder({ page }).analyze();
+    const critical = results.violations.filter(
+      (violation) => violation.impact === "critical",
+    );
+    expect(critical, JSON.stringify(critical, null, 2)).toEqual([]);
+  }
+});
+
+test("AC-22: /admin shows only the password form until signed in", async ({ page }) => {
+  await page.goto("/admin");
+  await expect(page.getByLabel(/password/i)).toBeVisible();
+  await expect(page.getByText(/Revenue/i)).toHaveCount(0);
+  await expect(page.getByText(/Previews generated/i)).toHaveCount(0);
+});
+
 test("AC-25: upload controls expose labels and images have alt text", async ({
   page,
 }) => {

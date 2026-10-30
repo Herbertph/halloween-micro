@@ -11,10 +11,10 @@ const contentSecurityPolicy = [
   "img-src 'self' data: blob:",
   "font-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  // HEIC conversion compiles bundled WebAssembly; Plausible is optional.
-  `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://plausible.io${
-    isDev ? " 'unsafe-eval'" : ""
-  }`,
+  // 'unsafe-eval' is required by heic2any's Emscripten worker (`new Function`);
+  // 'wasm-unsafe-eval' alone only permits WebAssembly compilation. Script
+  // origins stay locked to self + Plausible and the app renders no user HTML.
+  `script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://plausible.io`,
   "worker-src 'self' blob:",
   `connect-src 'self' https://plausible.io${isDev ? " ws: http: https:" : ""}`,
 ].join("; ");

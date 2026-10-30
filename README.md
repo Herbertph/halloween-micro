@@ -166,6 +166,17 @@ confirm test-mode checkout and webhook signatures before taking real payments.
 5. Replace `public/examples/*` and `public/og.png` with the owner's real assets before
    launch (the current files are generated placeholders).
 
+## Security headers and the HEIC decoder
+
+`next.config.ts` sends `Content-Security-Policy`, `X-Content-Type-Options`,
+`X-Frame-Options`, `Referrer-Policy` and `Permissions-Policy` on every response. The CSP
+allows `'unsafe-eval'` because `heic2any`'s Emscripten worker evaluates strings with
+`new Function`; `'wasm-unsafe-eval'` alone is not enough and production HEIC uploads would
+fail. The trade-off is deliberate for this one-page product: script origins are still
+limited to `self` and Plausible, and the app never renders user HTML. The HEIC path also
+decodes natively first (Safari), gives the WASM decoder a 20 s timeout, and falls back to
+the "export as JPG" message, so a blocked or broken decoder can never hang the form.
+
 ## Retention and privacy
 
 - `RETENTION_HOURS` (default 48) is enforced by application code, not a storage lifecycle

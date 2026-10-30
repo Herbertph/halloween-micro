@@ -1,6 +1,5 @@
 import "server-only";
 
-
 const DEV_DOWNLOAD_SECRET = "dev-download-signing-secret-change-me";
 const DEV_WEBHOOK_SECRET = "dev-mock-webhook-secret-change-me";
 const DEV_CRON_SECRET = "dev-cron-secret-change-me";

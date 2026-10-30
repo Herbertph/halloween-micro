@@ -82,6 +82,7 @@ scripts/                asset/fixture generators and the bundle secret scan
 - **Every `process.env` read must be listed in `.env.example`.** `tests/unit/env.test.ts` enforces it.
 - **Job transitions are one-way** and validated in `lib/jobs.ts`. Do not write statuses directly.
 - **Tests own their ports and data.** Unit tests use a per-file temp `DATA_DIR`; Playwright serves on `E2E_PORT` (default 3101) and never touches 4545.
+- **The CSP allows `'unsafe-eval'` on purpose.** `heic2any`'s WASM worker needs it; keep script origins locked to self + Plausible. The HEIC path has a timeout and a fallback message, so never make the decoder mandatory for the flow.
 - **Controllers stay thin.** Validation lives in `lib/api.ts`, orchestration in `lib/*-service` or route handlers, pure logic in `lib/`.
 - **Mock providers are the default** so the flow is demoable offline. Stripe/Gemini ship wired but unverified; do not exercise them in CI.
 

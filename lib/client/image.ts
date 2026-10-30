@@ -91,6 +91,45 @@ function canvasToJpeg(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
+const HEIC_CONVERSION_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  // Keep the abandoned promise from raising an unhandled rejection.
+  promise.catch(() => undefined);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("decode_failed")),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function convertHeic(file: File): Promise<Blob> {
+  try {
+    const { default: heic2any } = await import("heic2any");
+    const converted = await withTimeout(
+      heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 }),
+      HEIC_CONVERSION_TIMEOUT_MS,
+    );
+    const blob = Array.isArray(converted) ? converted[0] : converted;
+    if (!blob) throw new Error("decode_failed");
+    return blob;
+  } catch {
+    // A blocked/failed worker must surface as a fallback message, never a hang.
+    throw new Error("decode_failed");
+  }
+}
+
 /**
  * Browser-side pipeline: HEIC best-effort conversion, long edge capped at
  * 1536 px, JPEG re-encode at quality 0.9. Re-encoding through a canvas also
@@ -104,26 +143,23 @@ export async function prepareImage(file: File): Promise<File> {
     throw error;
   }
 
-  let source: Blob = file;
+  let decoded: Awaited<ReturnType<typeof decode>> | null = null;
   if (isHeic(file)) {
+    // Safari can decode HEIC natively; skip the WASM decoder when it can.
     try {
-      const { default: heic2any } = await import("heic2any");
-      const converted = await heic2any({
-        blob: file,
-        toType: "image/jpeg",
-        quality: 0.9,
-      });
-      source = Array.isArray(converted) ? converted[0] : converted;
+      decoded = await decode(file);
     } catch {
-      throw new Error("decode_failed");
+      decoded = null;
     }
   }
 
-  let decoded: Awaited<ReturnType<typeof decode>>;
-  try {
-    decoded = await decode(source);
-  } catch {
-    throw new Error("decode_failed");
+  if (!decoded) {
+    const source = isHeic(file) ? await convertHeic(file) : file;
+    try {
+      decoded = await decode(source);
+    } catch {
+      throw new Error("decode_failed");
+    }
   }
 
   const scale = Math.min(1, MAX_LONG_EDGE / Math.max(decoded.width, decoded.height));

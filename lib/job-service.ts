@@ -20,23 +20,9 @@ function jobKey(id: string) {
   return `${JOB_PREFIX}${id}`;
 }
 
-async function readIndex(): Promise<string[]> {
-  const raw = await getKv().get(JOB_INDEX);
-  if (!raw) return [];
-  try {
-    const ids = JSON.parse(raw);
-    return Array.isArray(ids) ? ids.filter((id) => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
 async function addToIndex(id: string): Promise<void> {
-  const ids = await readIndex();
-  if (!ids.includes(id)) {
-    ids.push(id);
-    await getKv().set(JOB_INDEX, JSON.stringify(ids));
-  }
+  // Atomic set add: concurrent job creation must not overwrite each other.
+  await getKv().setAdd(JOB_INDEX, id);
 }
 
 export async function createJob(input: {
@@ -116,19 +102,26 @@ export function publicJobView(job: Job, now: Date = new Date()): PublicJob {
 }
 
 /**
- * Cron cleanup: purges every expired job and returns how many were removed.
+ * Cron cleanup: purges every expired job, removes its index entry and returns
+ * how many jobs were swept. Expired ids are pruned so the index cannot grow
+ * without bound.
  */
 export async function cleanupExpiredJobs(now: Date = new Date()): Promise<number> {
-  const ids = await readIndex();
+  const kv = getKv();
+  const ids = await kv.setMembers(JOB_INDEX);
   let removed = 0;
   for (const id of ids) {
     const job = await loadJob(id, now);
-    if (!job) continue;
+    if (!job) {
+      await kv.setRemove(JOB_INDEX, id);
+      continue;
+    }
     if (job.status === EXPIRED_MARKER || isExpired(job, now)) {
       if (job.status !== EXPIRED_MARKER) {
         await purgeJobObjects(job);
         await saveJob(transition(job, "expired", now));
       }
+      await kv.setRemove(JOB_INDEX, id);
       removed += 1;
     }
   }
